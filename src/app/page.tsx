@@ -1,103 +1,288 @@
-import Image from "next/image";
+'use client'  
+import { supabase } from '@/lib/supabase/client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import { Eye, EyeOff, Loader2, CheckCircle, XCircle, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+type View = 'signin' | 'signup' | 'forgot';
+type Modal = { type: 'success' | 'error'; message: string } | null;
+
+
+const backdrop = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.2 } },
+};
+const modalAnimation = {
+  hidden: { opacity: 0, scale: 0.85 },
+  visible: { opacity: 1, scale: 1, transition: { duration: 0.2 } },
+  exit: { opacity: 0, scale: 0.85, transition: { duration: 0.2 } },
+};
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const router = useRouter();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const [view, setView] = useState<View>('signin');
+  const [loading, setLoading] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [modal, setModal] = useState<Modal>(null);
+
+  useEffect(() => setModal(null), []);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        const { data: dbUser } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
+
+        const role = dbUser?.role ?? 'student';
+        const paths: Record<string, string> = {
+          admin: '/dashboard/admin',
+          student: '/dashboard/student',
+        };
+        router.replace(paths[role as keyof typeof paths]);
+      }
+      if (event === 'SIGNED_OUT') {
+        setView('signin');
+        router.replace('/');
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  const openModal = (type: 'success' | 'error', msg: string) => {
+    setModal({ type, message: msg });
+    const timer = setTimeout(() => {
+      setModal(null);
+      if (type === 'success' && view === 'forgot') setView('signin');
+    }, 4000);
+    return () => clearTimeout(timer);
+  };
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    const mail = email.trim().toLowerCase();
+
+    try {
+      if (view === 'signin') {
+        const { error } = await supabase.auth.signInWithPassword({ email: mail, password });
+        if (error) openModal('error', error.message);
+      } else if (view === 'signup') {
+        const { error } = await supabase.auth.signUp({
+          email: mail,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) openModal('error', error.message);
+        else openModal('success', 'Check your email for the confirmation link!');
+      } else if (view === 'forgot') {
+        const { error } = await supabase.auth.resetPasswordForEmail(mail, {
+          redirectTo: `${window.location.origin}/update-password`,
+        });
+        if (error) openModal('error', error.message);
+        else openModal('success', 'Password‑reset link sent! Check your inbox.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="relative min-h-screen animated-gradient">
+
+      <main className="flex min-h-screen flex-col items-center justify-center p-8">
+        <div className="w-full max-w-md space-y-8">
+
+          {/* Logo + Title */}
+          <div className="text-center">
+            <div className="bg-white rounded-xl shadow-lg p-4 inline-block mb-6">
+              <Image src="/images/logo.png" alt="EduSync Logo" width={80} height={80} className="mx-auto" />
+            </div>
+            <h1 className="text-4xl font-bold text-white mb-2">Welcome to EduSync</h1>
+            <p className="text-indigo-100 text-lg">A smart collaborative learning platform</p>
+          </div>
+
+          {/* Form Card */}
+          <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
+            
+            <motion.form
+              key={view}
+              initial={{ opacity: 0, x: 30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }}
+              transition={{ duration: 0.3 }}
+              onSubmit={handleSubmit}
+              className="space-y-5"
+            >
+              {/* Email */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                  placeholder="you@example.com"
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900 placeholder-gray-400 transition"
+                />
+              </div>
+
+              {/* Password */}
+              {view !== 'forgot' && (
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <input
+                    type={showPwd ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    placeholder="••••••••"
+                    className="w-full px-4 py-3 pr-12 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900 placeholder-gray-400 transition"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwd(!showPwd)}
+                    className="absolute right-3 top-9 text-gray-500 hover:text-gray-700"
+                  >
+                    {showPwd ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
+              )}
+
+              {/* Remember + Forgot */}
+              {view === 'signin' && (
+                <div className="flex items-center justify-between text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
+                    <span className="text-gray-600">Remember me</span>
+                  </label>
+                  <button type="button" onClick={() => setView('forgot')} className="text-indigo-600 hover:underline">
+                    Forgot your password?
+                  </button>
+                </div>
+              )}
+
+              {/* Submit */}
+              <button
+                type="submit"
+                disabled={loading || !email || (view !== 'forgot' && !password)}
+                className="w-full py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 transition"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="animate-spin" size={20} />
+                    {view === 'signin' ? 'Signing in…' : view === 'signup' ? 'Creating…' : 'Sending…'}
+                  </>
+                ) : (
+                  <>{view === 'signin' ? 'Sign in' : view === 'signup' ? 'Sign up' : 'Send Reset Link'}</>
+                )}
+              </button>
+            </motion.form>
+
+            {/* Back to Sign‑in */}
+            {view === 'forgot' && (
+              <p className="text-center text-sm text-gray-600">
+                <button type="button" onClick={() => setView('signin')} className="text-indigo-600 hover:underline font-medium">
+                  Back to Sign in
+                </button>
+              </p>
+            )}
+
+            {/* Toggle Sign‑up / Sign‑in */}
+            {view !== 'forgot' && (
+              <p className="text-center text-sm text-gray-600">
+                {view === 'signin' ? (
+                  <>
+                    Don’t have an account?{' '}
+                    <button type="button" onClick={() => setView('signup')} className="text-indigo-600 hover:underline font-medium">
+                      Sign up
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Already have an account?{' '}
+                    <button type="button" onClick={() => setView('signin')} className="text-indigo-600 hover:underline font-medium">
+                      Sign in
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+
+          {/* Footer links */}
+          <div className="text-center text-sm text-indigo-200">
+            <a href="/privacy" className="hover:underline">Privacy Policy</a> •{' '}
+            <a href="/terms" className="hover:underline">Terms of Service</a>
+          </div>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+      {/*  MODAL  */}
+      <AnimatePresence>
+        {modal && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black/50 z-40"
+              variants={backdrop}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              onClick={() => setModal(null)}
+            />
+
+            <motion.div
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full text-center z-50"
+              variants={modalAnimation}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+            >
+              <button
+                onClick={() => setModal(null)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+              >
+                <X size={20} />
+              </button>
+
+              {modal.type === 'success' ? (
+                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+              ) : (
+                <XCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+              )}
+
+              <h3 className={`text-lg font-semibold ${modal.type === 'success' ? 'text-gray-900' : 'text-red-700'}`}>
+                {modal.type === 'success' ? 'Success!' : 'Error'}
+              </h3>
+
+              <p className="text-sm text-gray-600 mt-1">{modal.message}</p>
+
+              <button
+                onClick={() => {
+                  setModal(null);
+                  if (modal.type === 'success' && view === 'forgot') setView('signin');
+                }}
+                className={`mt-4 w-full py-2 rounded-lg text-sm font-medium transition ${
+                  modal.type === 'success'
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    : 'bg-red-600 text-white hover:bg-red-700'
+                }`}
+              >
+                Got it
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
