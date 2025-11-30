@@ -22,6 +22,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     { href: '/dashboard/student/ai-assistant', label: 'AI Study Buddy', icon: <Bot size={18} /> },
     { href: '/dashboard/student/assignments', label: 'Assignments', icon: <NotebookPen size={18} /> },
     { href: '/dashboard/student/generate-studyplan', label: 'Generate Study Plan', icon: <ClipboardList size={18} /> },
+    { href: '/dashboard/student/study-plans', label: 'My Study Plans', icon: <ClipboardList size={18} /> },
   ];
 
   return (

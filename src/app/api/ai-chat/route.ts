@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY! // MUST be service role key
 );
 
-const MODEL = "gpt-3.5-turbo";
+const MODEL = "gpt-4o-mini"; // or gpt-4o for better responses
 
 export async function POST(req: Request) {
   try {
