@@ -1,4 +1,3 @@
-// src/components/gamification/GamificationCard.tsx
 'use client';
 
 import { useEffect, useState } from 'react';

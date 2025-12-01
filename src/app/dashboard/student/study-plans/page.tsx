@@ -1,7 +1,6 @@
-// src/app/dashboard/student/study-plans/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import confetti from 'canvas-confetti';
@@ -22,6 +21,7 @@ import { FlameIcon } from 'lucide-react';
 interface StudyPlan {
   id: string;
   created_at: string;
+  course_id: string | null;
   content: {
     title: string;
     duration: string;
@@ -44,12 +44,21 @@ export default function StudyPlansPage() {
   const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
   const [streak, setStreak] = useState(0);
 
-  useEffect(() => {
-    loadPlans();
-    loadStreak();
+  const loadProgress = useCallback((planId: string) => {
+    const saved = localStorage.getItem(`studyplan_${planId}`);
+    if (saved) {
+      try {
+        const days = JSON.parse(saved);
+        setCompletedDays(new Set(days));
+      } catch {
+        setCompletedDays(new Set());
+      }
+    } else {
+      setCompletedDays(new Set());
+    }
   }, []);
 
-  async function loadPlans() {
+  const loadPlans = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -64,76 +73,98 @@ export default function StudyPlansPage() {
       setSelectedPlan(data[0]);
       loadProgress(data[0].id);
     }
-  }
+  }, [selectedPlan, loadProgress]);
 
-  function loadProgress(planId: string) {
-    const saved = localStorage.getItem(`studyplan_${planId}`);
-    if (saved) {
-      const days = JSON.parse(saved);
-      setCompletedDays(new Set(days));
-    }
-  }
+  useEffect(() => {
+    loadPlans();
+    loadStreak();
+  }, [loadPlans]);
 
-  function loadStreak() {
+  const loadStreak = () => {
     const today = new Date().toDateString();
-    const lastVisit = localStorage.getItem('last_study_date');
+    const lastVisit = localStorage.getItem('last_study_date') || '';
     const currentStreak = parseInt(localStorage.getItem('study_streak') || '0', 10);
 
     if (lastVisit === today) {
       setStreak(currentStreak);
-    } else {
-      const yesterday = new Date(Date.now() - 86400000).toDateString();
-      if (lastVisit === yesterday) {
-        const newStreak = currentStreak + 1;
-        localStorage.setItem('study_streak', newStreak.toString());
-        setStreak(newStreak);
-      } else {
-        localStorage.setItem('study_streak', '1');
-        setStreak(1);
-      }
-      localStorage.setItem('last_study_date', today);
+      return;
     }
-  }
 
-  // FIXED: Award 150 points + confetti ONLY ONCE per plan
-  function toggleDay(day: number) {
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    const newStreak = lastVisit === yesterday ? currentStreak + 1 : 1;
+
+    localStorage.setItem('study_streak', String(newStreak));
+    localStorage.setItem('last_study_date', today);
+    setStreak(newStreak);
+  };
+
+  const syncCourseProgress = async (courseId: string | null) => {
+    if (!courseId) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: allPlans } = await supabase
+      .from('ai_study_plans')
+      .select('id, content')
+      .eq('user_id', user.id)
+      .eq('course_id', courseId);
+
+    let totalDays = 0;
+    let completedDaysCount = 0;
+
+    allPlans?.forEach(plan => {
+      totalDays += plan.content.schedule.length;
+      const saved = localStorage.getItem(`studyplan_${plan.id}`);
+      if (saved) {
+        try {
+          completedDaysCount += JSON.parse(saved).length;
+        } catch {}
+      }
+    });
+
+    const percent = totalDays > 0 ? Math.round((completedDaysCount / totalDays) * 100) : 0;
+
+    await supabase.from('progress').upsert({
+      user_id: user.id,
+      course_id: courseId,
+      progress_percent: percent,
+      completed_tasks: completedDaysCount,
+      total_tasks: totalDays,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const toggleDay = async (day: number) => {
     if (!selectedPlan) return;
 
     const newSet = new Set(completedDays);
     const wasCompleted = newSet.has(day);
     const totalDays = selectedPlan.content.schedule.length;
     const willCompletePlan = !wasCompleted && newSet.size + 1 === totalDays;
+    const rewardGiven = localStorage.getItem(`plan_completed_reward_${selectedPlan.id}`) === 'true';
 
-    // Check if reward was already given for this plan
-    const rewardAlreadyGiven = localStorage.getItem(`plan_completed_reward_${selectedPlan.id}`) === 'true';
-
-    if (wasCompleted) {
-      newSet.delete(day);
-    } else {
-      newSet.add(day);
-    }
+    if (wasCompleted) newSet.delete(day);
+    else newSet.add(day);
 
     setCompletedDays(newSet);
     localStorage.setItem(`studyplan_${selectedPlan.id}`, JSON.stringify([...newSet]));
 
-    // Only trigger reward + confetti if:
-    // 1. This action completes the plan
-    // 2. Reward has NEVER been given before
-    if (willCompletePlan && !rewardAlreadyGiven) {
+    if (selectedPlan.course_id) await syncCourseProgress(selectedPlan.course_id);
+
+    if (willCompletePlan && !rewardGiven) {
       confetti({
-        particleCount: 500,
-        spread: 120,
+        particleCount: 600,
+        spread: 130,
         origin: { y: 0.6 },
-        colors: ['#ec4899', '#a855f7', '#8b5cf6', '#10b981', '#fbbf24', '#f59e0b'],
-        scalar: 1.3,
+        colors: ['#ec4899', '#a855f7', '#8b5cf6', '#10b981', '#fbbf24'],
+        scalar: 1.4,
       });
-
-      awardPoints(150, 'Completed entire study plan!');
-      localStorage.setItem(`plan_completed_reward_${selectedPlan.id}`, 'true'); // Mark as rewarded
+      await awardPoints(150);
+      localStorage.setItem(`plan_completed_reward_${selectedPlan.id}`, 'true');
     }
-  }
+  };
 
-  async function awardPoints(points: number, reason: string) {
+  const awardPoints = async (points: number) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -144,24 +175,22 @@ export default function StudyPlansPage() {
       .single();
 
     if (existing) {
-      await supabase
-        .from('gamification')
-        .update({ points: existing.points + points })
-        .eq('user_id', user.id);
+      await supabase.from('gamification').update({ points: existing.points + points }).eq('user_id', user.id);
     } else {
-      await supabase
-        .from('gamification')
-        .insert({ user_id: user.id, points });
+      await supabase.from('gamification').insert({ user_id: user.id, points });
     }
-  }
+  };
 
-  async function deletePlan(id: string) {
+  const deletePlan = async (id: string) => {
+    const plan = plans.find(p => p.id === id);
     await supabase.from('ai_study_plans').delete().eq('id', id);
     setPlans(prev => prev.filter(p => p.id !== id));
     if (selectedPlan?.id === id) {
       setSelectedPlan(plans[0] || null);
+      setCompletedDays(new Set());
     }
-  }
+    if (plan?.course_id) await syncCourseProgress(plan.course_id);
+  };
 
   const progress = selectedPlan
     ? Math.round((completedDays.size / selectedPlan.content.schedule.length) * 100)
@@ -169,88 +198,104 @@ export default function StudyPlansPage() {
 
   return (
     <div className="fixed inset-0 flex bg-[#0d0d0f] text-white overflow-hidden">
-      {/* SIDEBAR */}
-      <div className={`fixed inset-y-0 left-0 z-40 ${sidebarOpen ? 'w-72' : 'w-0'} bg-black/50 backdrop-blur-2xl border-r border-white/10 transition-all duration-300 overflow-hidden`}>
-        <div className="p-5 border-b border-white/10 flex items-center justify-between">
-          <h2 className="text-xl font-bold">My Study Plans</h2>
+      {/* SIDEBAR — NOW 100% SCROLLABLE + MATCHES YOUR DESIGN */}
+      <div className={`fixed inset-y-0 left-0 z-40 flex flex-col w-80 bg-black/70 backdrop-blur-3xl border-r border-white/5 transition-all duration-500 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-6 pb-4">
+          <h2 className="text-2xl font-black text-white">My Study Plans</h2>
           <button
             onClick={() => router.push('/dashboard/student/generate-studyplan')}
-            className="p-3 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl hover:scale-110 transition shadow-lg"
+            className="p-3 bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl hover:scale-110 transition-all shadow-2xl shadow-purple-600/50"
           >
-            <PlusIcon className="w-6 h-6" />
+            <PlusIcon className="w-ml-0.5 h-7 w-7" />
           </button>
         </div>
 
-        <div className="p-5">
-          <div className="bg-gradient-to-br from-orange-500/20 to-pink-600/20 border border-orange-500/30 rounded-2xl p-5 text-center">
-            <FlameIcon className="w-12 h-12 mx-auto mb-3 text-orange-400" />
-            <p className="text-4xl font-bold text-orange-300">{streak}</p>
-            <p className="text-sm text-orange-200">Day Streak</p>
-            {streak > 0 && <p className="text-xs text-orange-300 mt-1">Keep it burning!</p>}
+        {/* Streak Card — Matches your screenshot perfectly */}
+        <div className="mx-5 mb-6">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-orange-600/30 via-pink-700/20 to-purple-800/30 border border-orange-500/40 backdrop-blur-xl p-8 text-center shadow-2xl shadow-orange-600/30">
+            <div className="absolute inset-0 bg-white/5 rounded-3xl" />
+            <FlameIcon className="w-16 h-16 mx-auto mb-4 text-orange-400 drop-shadow-2xl" />
+            <p className="text-6xl font-black text-orange-300 drop-shadow-lg">{streak}</p>
+            <p className="text-lg font-bold text-orange-200 mt-2">Day Streak</p>
+            <p className="text-sm text-orange-300 mt-1 font-medium">Keep it burning!</p>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 pb-20">
+        {/* SCROLLABLE LIST — THIS IS THE FIX */}
+        <div className="flex-1 overflow-y-auto px-5 pb-10">
           {plans.length === 0 ? (
             <div className="text-center mt-20 text-gray-500">
-              <CalendarIcon className="w-16 h-16 mx-auto mb-4 opacity-30" />
-              <p>No plans yet</p>
-              <p className="text-sm">Create your first one!</p>
+              <div className="w-28 h-28 mx-auto mb-6 bg-white/5 rounded-3xl flex items-center justify-center border border-white/10">
+                <CalendarIcon className="w-14 h-14 text-gray-600" />
+              </div>
+              <p className="text-xl font-semibold">No plans yet</p>
+              <p className="text-sm mt-2">Tap + to create your first one</p>
             </div>
           ) : (
-            plans.map(plan => (
-              <div
-                key={plan.id}
-                className={`group mb-3 p-4 rounded-2xl cursor-pointer transition-all ${
-                  selectedPlan?.id === plan.id
-                    ? 'bg-white/20 border-l-4 border-l-pink-500 shadow-xl'
-                    : 'hover:bg-white/10'
-                }`}
-              >
-                <button
+            <div className="space-y-4">
+              {plans.map(plan => (
+                <div
+                  key={plan.id}
                   onClick={() => {
                     setSelectedPlan(plan);
                     loadProgress(plan.id);
+                    if (plan.course_id) syncCourseProgress(plan.course_id);
                   }}
-                  className="flex items-center gap-4 w-full text-left"
+                  className={`group relative overflow-hidden rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xl cursor-pointer transition-all duration-300 hover:bg-white/8 hover:border-pink-500/30 hover:shadow-xl hover:shadow-purple-600/20 ${
+                    selectedPlan?.id === plan.id
+                      ? 'ring-2 ring-pink-500/70 shadow-2xl shadow-pink-600/40 bg-gradient-to-br from-pink-600/20 via-purple-600/20 to-indigo-700/20 border-pink-500/50'
+                      : ''
+                  }`}
                 >
-                  <div className="p-2 bg-purple-500/20 rounded-lg">
-                    <CalendarIcon className="w-6 h-6 text-purple-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-pink-200 truncate">
-                      {plan.content.title}
+                  <div className="p-5 flex items-center gap-4">
+                    <div className={`p-3.5 rounded-2xl transition-all ${
+                      selectedPlan?.id === plan.id
+                        ? 'bg-gradient-to-br from-pink-500/40 to-purple-600/40 shadow-lg'
+                        : 'bg-white/10'
+                    }`}>
+                      <CalendarIcon className="w-8 h-8 text-purple-300" />
                     </div>
-                    <div className="text-xs text-gray-400">
-                      {new Date(plan.created_at).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                      })}
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-white text-lg truncate">
+                        {plan.content.title}
+                      </h4>
+                      <p className="text-sm text-gray-400">
+                        {new Date(plan.created_at).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </p>
                     </div>
+
+                    {/* Trash icon — always visible like in your screenshot */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm('Delete this study plan permanently?')) {
+                          deletePlan(plan.id);
+                        }
+                      }}
+                      className="p-2.5 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
+                    >
+                      <TrashIcon className="w-5 h-5" />
+                    </button>
                   </div>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deletePlan(plan.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition"
-                >
-                  <TrashIcon className="w-5 h-5" />
-                </button>
-              </div>
-            ))
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
 
       {/* MAIN CONTENT */}
-      <div className={`flex-1 flex flex-col ${sidebarOpen ? 'ml-72' : 'ml-0'} transition-all duration-300`}>
+      <div className={`flex-1 flex flex-col ${sidebarOpen ? 'ml-80' : 'ml-0'} transition-all duration-500`}>
         <div className="sticky top-0 z-50 bg-black/40 backdrop-blur-2xl px-6 py-5 border-b border-white/10 flex items-center justify-between">
           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-3 hover:bg-white/10 rounded-xl transition">
             {sidebarOpen ? <XMarkIcon className="w-7 h-7" /> : <Bars3Icon className="w-7 h-7" />}
           </button>
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+          <h1 className="text-3xl font-black bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
             {selectedPlan?.content.title || 'My Study Plans'}
           </h1>
           <button onClick={() => router.push('/dashboard/student')} className="p-3 hover:bg-white/10 rounded-xl transition">
@@ -258,10 +303,9 @@ export default function StudyPlansPage() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-8">
+        <div className="flex-1 overflow-y-auto p-8">
           {selectedPlan ? (
             <div className="max-w-6xl mx-auto space-y-10">
-              {/* Stats Grid */}
               <div className="grid grid-cols-4 gap-6">
                 <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-6 text-center border border-white/10">
                   <CalendarIcon className="w-12 h-12 mx-auto mb-3 text-purple-400" />
@@ -285,7 +329,6 @@ export default function StudyPlansPage() {
                 </div>
               </div>
 
-              {/* Schedule */}
               <div className="space-y-8">
                 {selectedPlan.content.schedule.map(day => {
                   const done = completedDays.has(day.day);
@@ -318,7 +361,7 @@ export default function StudyPlansPage() {
                           </div>
                         </div>
                         <p className="italic text-purple-300 text-lg max-w-lg text-right leading-relaxed">
-                          "{day.motivation}"
+                          {day.motivation}
                         </p>
                       </div>
 

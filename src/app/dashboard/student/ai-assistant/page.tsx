@@ -1,6 +1,8 @@
+// src/app/dashboard/student/ai-assistant/page.tsx
 'use client';
+
 import AIChat from '@/components/collaboration/AIchat';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import {
   PlusIcon,
@@ -8,7 +10,7 @@ import {
   Bars3Icon,
   XMarkIcon,
   ArrowLeftIcon,
-  TrashIcon
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 
@@ -24,23 +26,31 @@ export default function AIAssistantPage() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  useEffect(() => {
-    loadChats();
-  }, []);
-
-  async function loadChats() {
+  // Load chats — wrapped in useCallback to satisfy exhaustive-deps
+  const loadChats = useCallback(async () => {
     const { data } = await supabase
       .from('chat_sessions')
       .select('*')
       .order('created_at', { ascending: false });
 
-    setChats(data || []);
-  }
+    const chatList = data || [];
+    setChats(chatList);
 
-  async function startNewChat() {
+    // Auto-select first chat if none selected
+    if (chatList.length > 0 && !selectedChatId) {
+      setSelectedChatId(chatList[0].id);
+    }
+  }, [selectedChatId]);
+
+  // Load on mount + when a chat is deleted/created
+  useEffect(() => {
+    loadChats();
+  }, [loadChats]);
+
+  const startNewChat = useCallback(async () => {
     const { data } = await supabase
       .from('chat_sessions')
-      .insert([{ title: null }])
+      .insert([{ title: 'New Chat' }])
       .select()
       .single();
 
@@ -48,64 +58,65 @@ export default function AIAssistantPage() {
       setChats(prev => [data, ...prev]);
       setSelectedChatId(data.id);
     }
-  }
+  }, []);
 
-  async function deleteChat(id: string) {
-    await supabase.from('chat_sessions').delete().eq('id', id);
-    setChats(prev => prev.filter(c => c.id !== id));
-    if (selectedChatId === id) setSelectedChatId(null);
-  }
+  const deleteChat = useCallback(
+    async (id: string) => {
+      await supabase.from('chat_sessions').delete().eq('id', id);
+      setChats(prev => prev.filter(c => c.id !== id));
 
-  function updateTitle(id: string, title: string) {
+      if (selectedChatId === id) {
+        setSelectedChatId(chats[0]?.id ?? null);
+      }
+    },
+    [selectedChatId, chats]
+  );
+
+  const updateTitle = useCallback((id: string, title: string) => {
     setChats(prev => prev.map(c => (c.id === id ? { ...c, title } : c)));
-  }
+  }, []);
 
   return (
-    <div className="fixed inset-0 flex bg-[#0d0d0f] text-white">
-
+    <div className="fixed inset-0 flex bg-[#0a0a0b] text-white overflow-hidden">
       {/* SIDEBAR */}
       <div
-        className={`fixed inset-y-0 left-0 z-40 ${
-          sidebarOpen ? 'w-64' : 'w-0'
-        } bg-black/40 backdrop-blur-xl border-r border-white/10 flex flex-col transition-all`}
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-black/60 backdrop-blur-3xl border-r border-white/10 flex flex-col transition-transform duration-300 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
       >
-        <div className="p-4 border-b border-white/10 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">History</h2>
-
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-white/10">
+          <h2 className="text-lg font-bold">History</h2>
           <button
             onClick={startNewChat}
-            className="p-2 bg-blue-600 rounded-lg hover:bg-blue-700"
+            className="p-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl hover:scale-110 transition-all shadow-lg"
           >
-            <PlusIcon className="w-5 h-5 text-white" />
+            <PlusIcon className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
+        {/* Chat List */}
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {chats.map(chat => (
             <div
               key={chat.id}
-              className={`group flex items-center p-3 rounded-xl cursor-pointer ${
+              onClick={() => setSelectedChatId(chat.id)}
+              className={`group flex items-center gap-3 px-4 py-3 rounded-2xl cursor-pointer transition-all ${
                 selectedChatId === chat.id
-                  ? 'bg-white/20 border-l-4 border-blue-500'
-                  : 'hover:bg-white/10'
+                  ? 'bg-white/15 shadow-lg shadow-blue-500/20'
+                  : 'hover:bg-white/8'
               }`}
             >
+              <ChatBubbleLeftEllipsisIcon className="w-5 h-5 text-blue-400 flex-shrink-0" />
+              <span className="text-sm truncate flex-1">
+                {chat.title || 'New Chat'}
+              </span>
               <button
-                onClick={() => setSelectedChatId(chat.id)}
-                className="flex-1 flex items-center gap-2 text-left"
-              >
-                <ChatBubbleLeftEllipsisIcon className="w-5 h-5 text-blue-400" />
-                <span className="truncate text-sm">
-                  {chat.title || 'New Chat'}
-                </span>
-              </button>
-
-              <button
-                onClick={e => {
+                onClick={(e) => {
                   e.stopPropagation();
-                  deleteChat(chat.id);
+                  if (confirm('Delete this chat?')) deleteChat(chat.id);
                 }}
-                className="p-1 opacity-0 group-hover:opacity-100 text-red-400"
+                className="opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition"
               >
                 <TrashIcon className="w-4 h-4" />
               </button>
@@ -114,46 +125,32 @@ export default function AIAssistantPage() {
         </div>
       </div>
 
-      {/* MAIN CHAT AREA */}
-      <div
-        className={`flex-1 flex flex-col transition-all ${
-          sidebarOpen ? 'ml-64' : 'ml-0'
-        }`}
-      >
-        {/* HEADER */}
-        <div className="sticky top-0 bg-black/30 backdrop-blur-xl px-6 py-4 border-b border-white/10 flex items-center justify-between">
-          
-          {/* LEFT — Sidebar toggle */}
+      {/* MAIN CHAT */}
+      <div className={`flex-1 flex flex-col ${sidebarOpen ? 'ml-72' : 'ml-0'} transition-all duration-300`}>
+        {/* Top Bar */}
+        <div className="sticky top-0 z-40 bg-black/50 backdrop-blur-3xl border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 hover:bg-white/10 rounded-lg"
+            className="p-3 hover:bg-white/10 rounded-xl transition"
           >
-            {sidebarOpen ? (
-              <XMarkIcon className="w-6 h-6" />
-            ) : (
-              <Bars3Icon className="w-6 h-6" />
-            )}
+            {sidebarOpen ? <XMarkIcon className="w-6 h-6" /> : <Bars3Icon className="w-6 h-6" />}
           </button>
 
-          {/* CENTER — Title */}
-          <h1 className="text-xl font-bold text-center flex-1 -ml-8">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
             AI Study Buddy
           </h1>
 
-          {/* RIGHT — Back */}
           <button
             onClick={() => router.push('/dashboard/student')}
-            className="p-2 hover:bg-white/10 rounded-lg"
+            className="p-3 hover:bg-white/10 rounded-xl transition"
           >
             <ArrowLeftIcon className="w-6 h-6" />
           </button>
         </div>
 
-        {/* CHAT AREA */}
-        <div className="flex-1 p-6 overflow-hidden">
-          <div className="h-full rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 overflow-hidden">
-            <AIChat chatId={selectedChatId} onTitleUpdate={updateTitle} />
-          </div>
+        {/* Chat Area */}
+        <div className="flex-1 overflow-hidden">
+          <AIChat chatId={selectedChatId} onTitleUpdate={updateTitle} />
         </div>
       </div>
     </div>

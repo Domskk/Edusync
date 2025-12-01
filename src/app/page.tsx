@@ -218,12 +218,6 @@ export default function Home() {
               </p>
             )}
           </div>
-
-          {/* Footer links */}
-          <div className="text-center text-sm text-indigo-200">
-            <a href="/privacy" className="hover:underline">Privacy Policy</a> •{' '}
-            <a href="/terms" className="hover:underline">Terms of Service</a>
-          </div>
         </div>
       </main>
 

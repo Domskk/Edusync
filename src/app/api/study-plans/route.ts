@@ -1,32 +1,38 @@
 import { NextResponse } from "next/server";
 
-const MODEL = "openai/gpt-4o-mini"; // or "anthropic/claude-3-5-sonnet-20241022" for even better plans
+const MODEL = "openai/gpt-4o-mini"; // or "anthropic/claude-3-5-sonnet-20241022"
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { course, examDate, hoursPerDay = "3", topics = "", goal = "exam" } = body;
+    const {
+      course,
+      examDate,
+      hoursPerDay = "3",
+      topics = "",
+      goal = "exam",
+    } = body;
 
     if (!course?.trim()) {
-      return NextResponse.json({ error: "Course name required" }, { status: 400 });
+      return NextResponse.json({ error: "Course name is required" }, { status: 400 });
     }
 
     const days = examDate
-      ? Math.max(1, Math.ceil((new Date(examDate).getTime() - Date.now()) / (86400 * 1000)))
+      ? Math.max(1, Math.ceil((new Date(examDate).getTime() - Date.now()) / 86_400_000))
       : 14;
 
-    const prompt = `
-You are an expert academic coach creating the perfect study plan.
+    const prompt = `You are the world's best academic coach.
 
 Course: ${course}
 Goal: ${goal}
 Daily study time: ${hoursPerDay} hours
-${examDate ? `Days until exam: ${days}` : "2-week intensive"}
-Topics (if any): ${topics || "cover everything important"}
+${examDate ? `Days until exam: ${days}` : "Duration: 14-day intensive"}
+Topics to focus on: ${topics || "all essential topics"}
 
-Return ONLY valid JSON in this exact format:
+Return ONLY a valid JSON object with this exact structure. NO markdown. NO code blocks.
+
 {
-  "title": "14-Day Plan: Organic Chemistry Mastery",
+  "title": "${days}-Day Plan: ${course}",
   "duration": "${days} days",
   "dailyHours": "${hoursPerDay}",
   "totalSessions": ${days},
@@ -34,57 +40,86 @@ Return ONLY valid JSON in this exact format:
     {
       "day": 1,
       "date": "2025-12-01",
-      "focus": "Introduction & Basic Concepts",
-      "tasks": [
-        "Watch lecture 1-2",
-        "Read chapter 1 (pages 1-25)",
-        "Make summary notes",
-        "Do 20 practice questions"
-      ],
-      "timeEstimate": "3 hours",
-      "motivation": "You're starting strong!"
+      "focus": "Foundations",
+      "tasks": ["Watch intro lecture", "Read chapter 1", "Make notes", "Solve 15 questions"],
+      "timeEstimate": "${hoursPerDay} hours",
+      "motivation": "Day 1 sets the tone - you're already ahead!"
     }
-    // ... one object per day
+    // ... one object per day, up to day ${days}
   ]
 }
-Be encouraging, realistic, and detailed.
-`.trim();
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+Rules:
+- Return ONLY the JSON
+- No explanations
+- No code blocks
+- No extra text`;
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
-        "X-Title": "EduSync Study Plan",
+        "X-Title": "EduSync AI Study Planner",
       },
       body: JSON.stringify({
         model: MODEL,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "system",
+            content: "You respond only with valid JSON. No markdown. No explanations.",
+          },
+          { role: "user", content: prompt },
+        ],
         temperature: 0.7,
-        max_tokens: 3000,
+        max_tokens: 3500,
       }),
     });
 
-    const data = await res.json();
-    let plan;
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("OpenRouter error:", response.status, errText);
+      return NextResponse.json({ error: "AI service error" }, { status: 500 });
+    }
 
+    const data = await response.json();
+    const raw = data.choices?.[0]?.message?.content || "";
+
+    const clean = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+    const match = clean.match(/\{[\s\S]*\}/);
+    const jsonStr = match ? match[0] : clean;
+
+    let plan;
     try {
-      const text = data.choices[0].message.content;
-      plan = JSON.parse(text);
+      plan = JSON.parse(jsonStr);
     } catch (e) {
-      // Fallback if JSON is broken
+      console.error("JSON parse failed. Raw:", raw,"Error:", e);
+      // Safe fallback
       plan = {
-        title: `${days}-Day Study Plan: ${course}`,
+        title: `${days}-Day Plan: ${course}`,
         duration: `${days} days`,
         dailyHours: hoursPerDay,
-        schedule: [],
+        totalSessions: days,
+        schedule: Array.from({ length: days }, (_, i) => ({
+          day: i + 1,
+          date: new Date(Date.now() + i * 86_400_000).toISOString().split("T")[0],
+          focus: "Study Session",
+          tasks: ["Review material", "Practice problems", "Take notes"],
+          timeEstimate: `${hoursPerDay} hours`,
+          motivation: "Keep going — you're building momentum!",
+        })),
       };
     }
 
     return NextResponse.json({ plan });
+
   } catch (error) {
-    console.error("Study plan error:", error);
-    return NextResponse.json({ error: "Failed to generate plan" }, { status: 500 });
+    console.error("Study plan API error:", error);
+    return NextResponse.json(
+      { error: "Failed to generate plan", details: (error as Error).message },
+      { status: 500 }
+    );
   }
 }
