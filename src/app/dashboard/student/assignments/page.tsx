@@ -1,0 +1,452 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+import { requestFCMToken, onForegroundMessage } from "@/lib/firebase/client";
+import {
+  PlusIcon,
+  ArrowLeftIcon,
+  PencilIcon,
+  TrashIcon,
+  CalendarIcon,
+  BellIcon,
+  CheckCircleIcon,
+} from "@heroicons/react/24/outline";
+import { differenceInDays, format, isPast, isToday, isTomorrow } from "date-fns";
+
+interface Assignment {
+  id: string;
+  title: string;
+  subject: string | null;
+  due_date: string;
+  description: string | null;
+  is_completed: boolean;
+}
+
+export default function AssignmentsPage() {
+  const router = useRouter();
+
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<Assignment | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+
+  const [form, setForm] = useState({
+    id: "",
+    title: "",
+    subject: "",
+    due_date: "",
+    description: "",
+  });
+
+  // --------------------------
+  // LOAD ASSIGNMENTS
+  // --------------------------
+  async function loadAssignments() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("assignments")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("due_date", { ascending: true });
+
+    if (error) {
+      console.error("Error loading assignments:", error);
+    } else {
+      setAssignments(data || []);
+      checkUpcomingDeadlines(data || []);
+    }
+  }
+
+  // --------------------------
+  // CHECK UPCOMING DEADLINES
+  // --------------------------
+  const checkUpcomingDeadlines = useCallback((assignmentList: Assignment[]) => {
+    assignmentList.forEach((assignment) => {
+      if (assignment.is_completed) return;
+
+      const daysUntilDue = differenceInDays(new Date(assignment.due_date), new Date());
+      
+      // Notify if due in 1 day or today
+      if (daysUntilDue <= 1 && daysUntilDue >= 0) {
+        const message = daysUntilDue === 0 
+          ? `📅 Due TODAY: ${assignment.title}` 
+          : `⚠️ Due TOMORROW: ${assignment.title}`;
+        
+        if (Notification.permission === "granted") {
+          new Notification("Assignment Reminder", {
+            body: message,
+            icon: "/icon.svg",
+            tag: assignment.id,
+          });
+        }
+      }
+    });
+  }, []);
+
+  // --------------------------
+  // SETUP FIREBASE NOTIFICATIONS
+  // --------------------------
+  useEffect(() => {
+    const setupNotifications = async () => {
+      if (Notification.permission === "granted") {
+        setNotificationsEnabled(true);
+        await requestFCMToken();
+      }
+
+      onForegroundMessage((payload) => {
+        console.log("Foreground message:", payload);
+        if (payload.notification) {
+          alert(`${payload.notification.title}: ${payload.notification.body}`);
+        }
+      });
+    };
+
+    setupNotifications();
+  }, []);
+
+  // --------------------------
+  // ENABLE NOTIFICATIONS
+  // --------------------------
+  const enableNotifications = async () => {
+    if (Notification.permission === "default") {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        setNotificationsEnabled(true);
+        await requestFCMToken();
+        alert("✅ Notifications enabled! You'll get reminders for upcoming assignments.");
+      }
+    } else if (Notification.permission === "denied") {
+      alert("❌ Notifications blocked. Please enable them in your browser settings.");
+    }
+  };
+
+  // --------------------------
+  // LOAD ON MOUNT
+  // --------------------------
+  useEffect(() => {
+    loadAssignments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --------------------------
+  // SAVE (CREATE/UPDATE)
+  // --------------------------
+  async function saveAssignment() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    if (editing) {
+      // Update
+      await supabase
+        .from("assignments")
+        .update({
+          title: form.title,
+          subject: form.subject || null,
+          due_date: form.due_date,
+          description: form.description || null,
+        })
+        .eq("id", editing.id)
+        .eq("user_id", user.id);
+    } else {
+      // Create
+      await supabase
+        .from("assignments")
+        .insert({
+          user_id: user.id,
+          title: form.title,
+          subject: form.subject || null,
+          due_date: form.due_date,
+          description: form.description || null,
+          is_completed: false,
+        });
+    }
+
+    setShowModal(false);
+    setEditing(null);
+    setForm({
+      id: "",
+      title: "",
+      subject: "",
+      due_date: "",
+      description: "",
+    });
+
+    loadAssignments();
+  }
+
+  // --------------------------
+  // TOGGLE COMPLETE
+  // --------------------------
+  async function toggleComplete(assignment: Assignment) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from("assignments")
+      .update({ is_completed: !assignment.is_completed })
+      .eq("id", assignment.id)
+      .eq("user_id", user.id);
+
+    loadAssignments();
+  }
+
+  // --------------------------
+  // DELETE
+  // --------------------------
+  async function deleteAssignment(id: string) {
+    if (!confirm("Delete this assignment?")) return;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from("assignments")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    loadAssignments();
+  }
+
+  // --------------------------
+  // GET URGENCY BADGE
+  // --------------------------
+  const getUrgencyBadge = (dueDate: string, isCompleted: boolean) => {
+    if (isCompleted) return null;
+    
+    const date = new Date(dueDate);
+    const daysUntil = differenceInDays(date, new Date());
+
+    if (isPast(date) && !isToday(date)) {
+      return <span className="px-4 py-2 bg-red-500/20 text-red-400 rounded-full text-sm font-bold">OVERDUE</span>;
+    }
+    if (isToday(date)) {
+      return <span className="px-4 py-2 bg-orange-500/20 text-orange-400 rounded-full text-sm font-bold">DUE TODAY</span>;
+    }
+    if (isTomorrow(date)) {
+      return <span className="px-4 py-2 bg-yellow-500/20 text-yellow-400 rounded-full text-sm font-bold">DUE TOMORROW</span>;
+    }
+    if (daysUntil <= 7) {
+      return <span className="px-4 py-2 bg-blue-500/20 text-blue-400 rounded-full text-sm font-bold">{daysUntil} DAYS LEFT</span>;
+    }
+    return null;
+  };
+
+  const upcomingCount = assignments.filter(a => !a.is_completed && differenceInDays(new Date(a.due_date), new Date()) <= 7).length;
+  const overdueCount = assignments.filter(a => !a.is_completed && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date))).length;
+
+  return (
+    <div className="fixed inset-0 bg-[#0d0d0f] text-white flex flex-col">
+      {/* HEADER */}
+      <div className="flex items-center justify-between p-6 border-b border-white/10 bg-black/50 backdrop-blur-xl">
+        <div className="flex items-center gap-6">
+          <h1 className="text-5xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+            Assignments
+          </h1>
+          
+          {/* Stats */}
+          <div className="flex gap-4 ml-8">
+            {overdueCount > 0 && (
+              <div className="px-5 py-3 bg-red-500/20 rounded-full border border-red-500/50">
+                <span className="text-red-400 font-bold">{overdueCount} Overdue</span>
+              </div>
+            )}
+            {upcomingCount > 0 && (
+              <div className="px-5 py-3 bg-yellow-500/20 rounded-full border border-yellow-500/50">
+                <span className="text-yellow-400 font-bold">{upcomingCount} Due Soon</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          {!notificationsEnabled && (
+            <button
+              onClick={enableNotifications}
+              className="flex items-center gap-2 px-6 py-3 bg-blue-500/20 border border-blue-500/50 rounded-full hover:bg-blue-500/30 transition"
+            >
+              <BellIcon className="w-6 h-6 text-blue-400" />
+              <span className="text-blue-400 font-semibold">Enable Reminders</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => router.push("/dashboard/student")}
+            className="p-3 hover:bg-white/10 rounded-xl"
+          >
+            <ArrowLeftIcon className="w-7 h-7" />
+          </button>
+
+          <button
+            onClick={() => {
+              setEditing(null);
+              setForm({
+                id: "",
+                title: "",
+                subject: "",
+                due_date: "",
+                description: "",
+              });
+              setShowModal(true);
+            }}
+            className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full text-lg font-bold hover:scale-105 transition shadow-2xl shadow-purple-500/50"
+          >
+            <PlusIcon className="w-7 h-7" /> New Assignment
+          </button>
+        </div>
+      </div>
+
+      {/* LIST */}
+      <div className="flex-1 overflow-y-auto p-10 space-y-8">
+        {assignments.length === 0 ? (
+          <div className="text-center py-40 text-gray-500">
+            <CalendarIcon className="w-28 h-28 mx-auto mb-6 text-gray-600" />
+            <p className="text-3xl font-bold mb-2">No assignments yet</p>
+            <p className="text-xl text-gray-600">Create your first assignment to get started!</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {assignments.map((a) => (
+              <div
+                key={a.id}
+                className={`bg-white/5 backdrop-blur-xl border rounded-3xl p-8 transition-all ${
+                  a.is_completed 
+                    ? 'border-green-500/30 opacity-60' 
+                    : 'border-white/10 hover:border-pink-500/50'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-6">
+                  {/* Checkbox */}
+                  <button
+                    onClick={() => toggleComplete(a)}
+                    className={`flex-shrink-0 w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all ${
+                      a.is_completed
+                        ? 'bg-green-500 border-green-500'
+                        : 'border-white/30 hover:border-pink-500'
+                    }`}
+                  >
+                    {a.is_completed && <CheckCircleIcon className="w-6 h-6 text-white" />}
+                  </button>
+
+                  {/* Content */}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-4 mb-2">
+                      <h3 className={`text-3xl font-bold ${a.is_completed ? 'line-through text-gray-500' : ''}`}>
+                        {a.title}
+                      </h3>
+                      {getUrgencyBadge(a.due_date, a.is_completed)}
+                    </div>
+                    
+                    {a.subject && (
+                      <p className="text-purple-400 text-lg mb-2">{a.subject}</p>
+                    )}
+                    
+                    <p className="text-gray-400 text-xl mb-2">
+                      📅 Due: {format(new Date(a.due_date), "MMM dd, yyyy")}
+                    </p>
+                    
+                    {a.description && (
+                      <p className="text-gray-500 text-base mt-3">{a.description}</p>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setEditing(a);
+                        setForm({
+                          id: a.id,
+                          title: a.title,
+                          subject: a.subject || "",
+                          due_date: a.due_date,
+                          description: a.description || "",
+                        });
+                        setShowModal(true);
+                      }}
+                      className="p-4 bg-white/10 rounded-xl hover:bg-white/20 transition"
+                    >
+                      <PencilIcon className="w-6 h-6" />
+                    </button>
+
+                    <button
+                      onClick={() => deleteAssignment(a.id)}
+                      className="p-4 bg-red-500/20 rounded-xl hover:bg-red-500/40 transition"
+                    >
+                      <TrashIcon className="w-6 h-6 text-red-400" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* MODAL */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xl flex items-center justify-center p-6 z-50">
+          <div className="bg-[#1a1a1e] p-10 rounded-3xl border border-white/20 w-full max-w-xl">
+            <h2 className="text-4xl font-bold mb-10 bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+              {editing ? "Edit Assignment" : "New Assignment"}
+            </h2>
+
+            <input
+              type="text"
+              value={form.title}
+              placeholder="Assignment title"
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="w-full mb-6 px-6 py-5 bg-white/10 border border-white/20 rounded-2xl focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 outline-none"
+            />
+
+            <input
+              type="text"
+              value={form.subject}
+              placeholder="Subject (optional)"
+              onChange={(e) => setForm({ ...form, subject: e.target.value })}
+              className="w-full mb-6 px-6 py-5 bg-white/10 border border-white/20 rounded-2xl focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 outline-none"
+            />
+
+            <input
+              type="date"
+              value={form.due_date}
+              onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+              className="w-full mb-6 px-6 py-5 bg-white/10 border border-white/20 rounded-2xl focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 outline-none"
+            />
+
+            <textarea
+              value={form.description}
+              placeholder="Description (optional)"
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              className="w-full mb-8 px-6 py-5 bg-white/10 border border-white/20 rounded-2xl h-32 focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 outline-none resize-none"
+            />
+
+            <div className="flex gap-4">
+              <button
+                onClick={saveAssignment}
+                disabled={!form.title.trim() || !form.due_date}
+                className="flex-1 py-5 bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl font-bold hover:scale-105 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {editing ? "Save Changes" : "Create Assignment"}
+              </button>
+
+              <button
+                onClick={() => setShowModal(false)}
+                className="px-10 py-5 bg-white/10 rounded-2xl hover:bg-white/20 transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

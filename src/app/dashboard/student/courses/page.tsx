@@ -1,4 +1,3 @@
-  // src/app/dashboard/student/courses/page.tsx
   'use client';
 
   import { useEffect, useState } from 'react';

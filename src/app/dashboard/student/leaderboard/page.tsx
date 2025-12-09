@@ -1,233 +1,333 @@
 // src/app/dashboard/student/leaderboard/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import  RankBorder  from '@/components/gamification/RankBorder';
-import { Flame, Trophy, Crown } from 'lucide-react';
+import { RankBorder } from '@/components/gamification/RankBorder';
+import { Flame, Trophy, Crown, Search, ArrowLeft, Zap } from 'lucide-react';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 
-// Strict rank type — fixes RankBorder error
-type RankType = "Mythic" | "Legend" | "Master" | "Elite" | "Warrior" | "Rookie";
+type RankType = 'Mythic' | 'Legend' | 'Master' | 'Elite' | 'Warrior' | 'Rookie';
+
+type LeaderboardRow = {
+  user_id: string;
+  points: number;
+  current_streak: number;
+  email: string | null;
+  raw_user_meta_data: {
+    full_name?: string;
+    display_name?: string;
+    avatar_url?: string;
+  } | null;
+};
 
 interface LeaderboardUser {
   id: string;
   name: string;
+  avatar_url: string | null;
   points: number;
   level: number;
-  streak: number;
+  current_streak: number;
   rank: RankType;
   position: number;
 }
 
-// Type for Supabase query
-interface GamificationRow {
-  user_id: string;
-  points: number;
-  profile: {
-    full_name: string;
-  } | null;
-}
-
 export default function LeaderboardPage() {
+  const router = useRouter();
   const [leaders, setLeaders] = useState<LeaderboardUser[]>([]);
+  const [filtered, setFiltered] = useState<LeaderboardUser[]>([]);
   const [currentUser, setCurrentUser] = useState<LeaderboardUser | null>(null);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
 
-  useEffect(() => {
-    loadLeaderboard();
-  }, []);
+  const getRank = (level: number): RankType =>
+    level >= 50 ? 'Mythic' :
+    level >= 40 ? 'Legend' :
+    level >= 30 ? 'Master' :
+    level >= 20 ? 'Elite' :
+    level >= 10 ? 'Warrior' : 'Rookie';
 
-  async function loadLeaderboard() {
+  const loadLeaderboard = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data } = await supabase
-      .from('gamification')
-      .select('user_id, points, profile:name (full_name)')
-      .order('points', { ascending: false })
-      .limit(50);
+    const { data, error } = await supabase
+      .rpc('get_leaderboard_with_profiles')
+      .select('*');
 
-    const rows = (data || []) as unknown as GamificationRow[];
+    if (error || !data) {
+      console.error('Leaderboard error:', error);
+      return;
+    }
 
-    const processed: LeaderboardUser[] = rows.map((d, i) => {
-      const points = d.points ?? 0;
+    const processed: LeaderboardUser[] = (data as LeaderboardRow[]).map((row, index) => {
+      const points = row.points ?? 0;
       const level = Math.floor(points / 100) + 1;
-
-      const rank: RankType =
-        level >= 50 ? 'Mythic' :
-        level >= 40 ? 'Legend' :
-        level >= 30 ? 'Master' :
-        level >= 20 ? 'Elite' :
-        level >= 10 ? 'Warrior' :
-        'Rookie';
+      const meta = row.raw_user_meta_data;
 
       return {
-        id: d.user_id,
-        name: d.profile?.full_name ?? 'Student',
+        id: row.user_id,
+        name: meta?.display_name || meta?.full_name || row.email?.split('@')[0] || 'Student',
+        avatar_url: meta?.avatar_url || null,
         points,
         level,
-        streak: Math.floor(Math.random() * 15),
-        rank,
-        position: i + 1
+        current_streak: row.current_streak || 0,
+        rank: getRank(level),
+        position: index + 1,
       };
     });
 
     setLeaders(processed);
+    setFiltered(processed);
+    setCurrentUser(processed.find(p => p.id === user.id) || null);
+  }, []);
 
-    const current = processed.find((p) => p.id === user.id);
-    if (current) setCurrentUser(current);
-  }
+  useEffect(() => {
+    loadLeaderboard();
+
+    const channel = supabase
+      .channel('leaderboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gamification' }, loadLeaderboard)
+      .on('postgres_changes', { event: '*', schema: 'auth', table: 'users' }, loadLeaderboard)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadLeaderboard]);
+
+  useEffect(() => {
+    const q = search.toLowerCase();
+    setFiltered(leaders.filter(u => u.name.toLowerCase().includes(q)));
+    setPage(1);
+  }, [search, leaders]);
+
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.ceil(filtered.length / pageSize);
+
+  const getRankGradient = (rank: RankType) => {
+    const map: Record<RankType, string> = {
+      Mythic: 'from-purple-500 to-pink-500',
+      Legend: 'from-red-500 to-orange-500',
+      Master: 'from-cyan-400 to-blue-600',
+      Elite: 'from-green-400 to-emerald-600',
+      Warrior: 'from-yellow-400 to-amber-600',
+      Rookie: 'from-gray-400 to-gray-600',
+    };
+    return map[rank];
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-indigo-900 p-6">
-      <div className="max-w-7xl mx-auto">
-
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -50 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-16"
-        >
-          <h1 className="text-6xl md:text-8xl font-black bg-gradient-to-r from-yellow-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
-            GLOBAL LEADERBOARD
-          </h1>
-          <p className="text-2xl text-gray-300 mt-4">
-            Only the strongest survive
-          </p>
-        </motion.div>
-
-        {/* Podium – Top 3 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20 items-end">
-          {/* 2nd */}
-          {leaders[1] && (
-            <motion.div
-              initial={{ y: 100 }}
-              animate={{ y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="order-1 md:order-2"
-            >
-              <div className="text-center">
-                <Crown className="w-16 h-16 mx-auto text-yellow-400 mb-4" />
-                <RankBorder rank={leaders[1].rank} level={leaders[1].level} size="lg">
-                  <p className="text-6xl font-black text-yellow-400">#2</p>
-                </RankBorder>
-                <p className="text-3xl font-bold text-white mt-6">{leaders[1].name}</p>
-                <p className="text-xl text-gray-300">
-                  {leaders[1].points.toLocaleString()} XP
-                </p>
-              </div>
-            </motion.div>
-          )}
-
-          {/* 1st */}
-          {leaders[0] && (
-            <motion.div
-              initial={{ y: 100 }}
-              animate={{ y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="order-2"
-            >
-              <div className="text-center">
-                <Trophy className="w-20 h-20 mx-auto text-yellow-500 mb-4 animate-pulse" />
-                <RankBorder rank={leaders[0].rank} level={leaders[0].level} size="xl">
-                  <p className="text-8xl font-black text-yellow-400">#1</p>
-                </RankBorder>
-                <p className="text-4xl font-bold text-white mt-8">{leaders[0].name}</p>
-                <p className="text-2xl text-yellow-400 font-bold">
-                  {leaders[0].points.toLocaleString()} XP
-                </p>
-              </div>
-            </motion.div>
-          )}
-
-          {/* 3rd */}
-          {leaders[2] && (
-            <motion.div
-              initial={{ y: 100 }}
-              animate={{ y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="order-3"
-            >
-              <div className="text-center">
-                <Trophy className="w-14 h-14 mx-auto text-orange-600 mb-4" />
-                <RankBorder rank={leaders[2].rank} level={leaders[2].level} size="md">
-                  <p className="text-5xl font-black text-orange-400">#3</p>
-                </RankBorder>
-                <p className="text-2xl font-bold text-white mt-4">{leaders[2].name}</p>
-                <p className="text-lg text-gray-300">
-                  {leaders[2].points.toLocaleString()} XP
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </div>
-
-        {/* List */}
-        <div className="bg-black/40 backdrop-blur-xl rounded-3xl border border-white/20 p-8">
-          <h2 className="text-4xl font-bold text-white mb-8 text-center">
-            Top Warriors
-          </h2>
-
-          <div className="space-y-4">
-            {leaders.slice(3).map((player, i) => (
-              <motion.div
-                key={player.id}
-                initial={{ opacity: 0, x: -50 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className={`flex items-center gap-6 p-6 rounded-2xl bg-white/5 hover:bg-white/10 transition-all ${
-                  currentUser?.id === player.id ? 'ring-4 ring-yellow-400' : ''
-                }`}
-              >
-                <div className="text-4xl font-black text-gray-400 w-16">#{i + 4}</div>
-
-                <RankBorder rank={player.rank} level={player.level} size="sm" />
-
-                <div className="flex-1">
-                  <p className="text-2xl font-bold text-white">{player.name}</p>
-                  <p className="text-gray-400">
-                    Level {player.level} • {player.rank}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p className="text-3xl font-black text-cyan-400">
-                    {player.points.toLocaleString()}
-                  </p>
-                  <p className="text-gray-400 flex items-center justify-end gap-2">
-                    <Flame className="w-5 h-5 text-orange-400" /> {player.streak} day streak
-                  </p>
-                </div>
-              </motion.div>
-            ))}
+    <div className="fixed inset-0 bg-gradient-to-br from-[#0a0a0d] via-[#0f0f1a] to-[#1a0033] text-white flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="relative p-6 border-b border-white/10 backdrop-blur-2xl bg-black/50 z-10">
+        <div className="absolute inset-0 bg-gradient-to-r from-purple-900/20 via-transparent to-cyan-900/20" />
+        <div className="relative flex items-center justify-between">
+          <button onClick={() => router.push('/dashboard/student')} className="p-3 hover:bg-white/10 rounded-2xl transition">
+            <ArrowLeft className="w-8 h-8" />
+          </button>
+          <div className="text-center">
+            <h1 className="text-5xl font-black bg-gradient-to-r from-yellow-400 via-pink-500 to-purple-600 bg-clip-text text-transparent">
+              GLOBAL LEADERBOARD
+            </h1>
+            <p className="text-sm text-gray-400 mt-1">Top Scholars • Season 1</p>
+          </div>
+          <div className="relative w-80">
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search warriors..."
+              className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/20 backdrop-blur-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 outline-none transition"
+            />
+            <Search className="absolute right-4 top-4.5 w-6 h-6 text-gray-400" />
           </div>
         </div>
+      </div>
 
-        {/* Current User Display */}
-        {currentUser && (
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.8 }}
-            className="mt-16 text-center"
-          >
-            <p className="text-3xl font-bold text-gray-300 mb-8">Your Rank</p>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-7xl mx-auto p-8 space-y-12">
 
-            <RankBorder rank={currentUser.rank} level={currentUser.level} size="lg">
-              <p className="text-6xl font-black text-yellow-400">
-                #{leaders.findIndex((p) => p.id === currentUser.id) + 1}
-              </p>
-            </RankBorder>
+          {/* Podium */}
+          {leaders.length > 0 && (
+            <div className="grid grid-cols-3 gap-8 items-end justify-center px-12">
+              {/* #2 */}
+              {leaders[1] && (
+                <motion.div initial={{ y: 80 }} animate={{ y: 0 }} transition={{ delay: 0.4 }}>
+                  <div className="relative group">
+                    <div className="absolute -inset-4 bg-gradient-to-r from-yellow-500/30 to-orange-500/30 rounded-3xl blur-xl" />
+                    <div className="relative bg-black/60 backdrop-blur-2xl border border-white/20 rounded-3xl p-8 text-center">
+                      <Crown className="w-16 h-16 mx-auto text-yellow-400 mb-4" />
+                      <RankBorder rank={leaders[1].rank} level={leaders[1].level} size="xl">
+                        <div className="text-7xl font-black text-yellow-400">#2</div>
+                      </RankBorder>
+                      <Image
+                        src={leaders[1].avatar_url ?? "/default-avatar.png"}
+                        alt={leaders[1].name}
+                        width={120} height={120}
+                        className="mx-auto mt-6 rounded-full ring-8 ring-yellow-500/50"
+                        unoptimized
+                      />
+                      <p className="text-2xl font-bold mt-4">{leaders[1].name}</p>
+                      <p className="text-4xl font-black text-yellow-400 mt-2">{leaders[1].points.toLocaleString()}</p>
+                      <div className="flex items-center justify-center gap-2 mt-3">
+                        <Flame className="w-6 h-6 text-orange-500" />
+                        <span className="text-orange-400 font-bold">{leaders[1].current_streak} day streak</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
-            <p className="text-4xl font-bold text-white mt-6">
-              {currentUser.name}
-            </p>
+              {/* #1 */}
+              {leaders[0] && (
+                <motion.div initial={{ y: 120 }} animate={{ y: 0 }} transition={{ delay: 0.2 }} className="transform scale-110">
+                  <div className="relative group">
+                    <div className="absolute -inset-8 bg-gradient-to-r from-purple-600 via-pink-600 to-yellow-500 rounded-full blur-3xl animate-pulse" />
+                    <div className="relative bg-black/80 backdrop-blur-3xl border-4 border-yellow-500/80 rounded-3xl p-10 text-center shadow-2xl">
+                      <Trophy className="w-24 h-24 mx-auto text-yellow-400 mb-6 animate-pulse" />
+                      <RankBorder rank={leaders[0].rank} level={leaders[0].level} size="xl">
+                        <div className="text-9xl font-black text-yellow-300 drop-shadow-2xl">#1</div>
+                      </RankBorder>
+                      <Image
+                        src={leaders[0].avatar_url ?? "/default-avatar.png"}
+                        alt={leaders[0].name}
+                        width={160} height={160}
+                        className="mx-auto mt-8 rounded-full ring-8 ring-yellow-400 shadow-2xl"
+                        unoptimized
+                      />
+                      <p className="text-4xl font-black mt-6 bg-gradient-to-r from-yellow-400 to-pink-400 bg-clip-text text-transparent">
+                        {leaders[0].name}
+                      </p>
+                      <p className="text-6xl font-black text-yellow-400 mt-4">{leaders[0].points.toLocaleString()}</p>
+                      <div className="flex items-center justify-center gap-3 mt-4">
+                        <Zap className="w-8 h-8 text-yellow-500 animate-pulse" />
+                        <span className="text-2xl font-bold text-yellow-400">{leaders[0].current_streak} day streak</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
-            <p className="text-2xl text-cyan-400">
-              {currentUser.points.toLocaleString()} XP
-            </p>
-          </motion.div>
-        )}
+              {/* #3 */}
+              {leaders[2] && (
+                <motion.div initial={{ y: 80 }} animate={{ y: 0 }} transition={{ delay: 0.6 }}>
+                  <div className="relative group">
+                    <div className="absolute -inset-4 bg-gradient-to-r from-orange-500/30 to-red-500/30 rounded-3xl blur-xl" />
+                    <div className="relative bg-black/60 backdrop-blur-2xl border border-white/20 rounded-3xl p-8 text-center">
+                      <Trophy className="w-14 h-14 mx-auto text-orange-500 mb-4" />
+                      <RankBorder rank={leaders[2].rank} level={leaders[2].level} size="lg">
+                        <div className="text-6xl font-black text-orange-400">#3</div>
+                      </RankBorder>
+                      <Image
+                        src={leaders[2].avatar_url ?? "/default-avatar.png"}
+                        alt={leaders[2].name}
+                        width={100} height={100}
+                        className="mx-auto mt-6 rounded-full ring-8 ring-orange-500/50"
+                        unoptimized
+                      />
+                      <p className="text-2xl font-bold mt-4">{leaders[2].name}</p>
+                      <p className="text-4xl font-black text-orange-400 mt-2">{leaders[2].points.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          )}
+
+          {/* List */}
+          <div className="space-y-4">
+            {paginated.map((player, i) => {
+              const globalRank = (page - 1) * pageSize + i + 1;
+              const isCurrentUser = currentUser?.id === player.id;
+
+              return (
+                <motion.div
+                  key={player.id}
+                  initial={{ opacity: 0, x: -50 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className={`relative overflow-hidden rounded-2xl transition-all ${
+                    isCurrentUser ? 'ring-4 ring-yellow-400 scale-105 shadow-2xl' : 'hover:scale-[1.02]'
+                  }`}
+                >
+                  <div className={`absolute inset-0 bg-gradient-to-r ${getRankGradient(player.rank)} opacity-20`} />
+                  <div className="relative bg-black/70 backdrop-blur-xl border border-white/10 p-6 flex items-center gap-6">
+                    <div className={`text-4xl font-black w-20 text-center ${globalRank <= 3 ? 'text-yellow-400' : 'text-gray-400'}`}>
+                      #{globalRank}
+                    </div>
+                    <Image
+                      src={player.avatar_url ?? "/default-avatar.png"}
+                      alt={player.name}
+                      width={80} height={80}
+                      className="rounded-full ring-4 ring-white/20"
+                      unoptimized
+                    />
+                    <div className="flex-1">
+                      <p className="text-2xl font-bold">{player.name}</p>
+                      <div className="flex items-center gap-4 mt-1">
+                        <RankBorder rank={player.rank} level={player.level} size="sm" />
+                        <span className="text-gray-400">Level {player.level}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+                        {player.points.toLocaleString()}
+                      </p>
+                      <div className="flex items-center justify-end gap-2 mt-2">
+                        <Flame className={`w-6 h-6 ${player.current_streak >= 10 ? 'text-red-500' : 'text-orange-400'}`} />
+                        <span className="font-bold">{player.current_streak} day streak</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex justify-center items-center gap-6 pt-12">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                className="px-10 py-4 rounded-2xl bg-white/10 disabled:opacity-50 hover:bg-white/20 transition text-lg font-bold">
+                Previous
+              </button>
+              <span className="px-8 py-4 bg-purple-900/50 rounded-2xl border border-purple-500/50 font-bold">
+                Page {page} / {totalPages}
+              </span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                className="px-10 py-4 rounded-2xl bg-white/10 disabled:opacity-50 hover:bg-white/20 transition text-lg font-bold">
+                Next
+              </button>
+            </div>
+          )}
+
+          {/* Your Rank */}
+          {currentUser && (
+            <div className="mt-20 text-center">
+              <p className="text-2xl text-gray-400 mb-6">Your Current Rank</p>
+              <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }}>
+                <div className="relative inline-block">
+                  <div className="absolute -inset-8 bg-gradient-to-r from-yellow-500 to-purple-600 rounded-full blur-3xl opacity-70" />
+                  <RankBorder rank={currentUser.rank} level={currentUser.level} size="xl">
+                    <div className="text-9xl font-black text-yellow-300">
+                      #{leaders.findIndex(p => p.id === currentUser.id) + 1}
+                    </div>
+                  </RankBorder>
+                </div>
+                <p className="text-5xl font-black mt-8 bg-gradient-to-r from-yellow-400 to-pink-400 bg-clip-text text-transparent">
+                  {currentUser.name}
+                </p>
+                <p className="text-4xl font-bold text-cyan-400 mt-4">
+                  {currentUser.points.toLocaleString()} Points
+                </p>
+              </motion.div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

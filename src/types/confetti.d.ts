@@ -1,4 +1,5 @@
-declare module 'confetti' {
+// src/types/confetti.d.ts
+declare module 'canvas-confetti' {
   interface ConfettiOptions {
     particleCount?: number;
     spread?: number;
@@ -10,7 +11,7 @@ declare module 'confetti' {
     ticks?: number;
     zIndex?: number;
     disableForReducedMotion?: boolean;
-    [key: string]: any;
+    [key: string]: unknown; 
   }
 
   function confetti(options?: ConfettiOptions): Promise<null>;

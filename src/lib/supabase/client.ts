@@ -12,3 +12,5 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storageKey: 'supabase.auth.token',
   },
 });
+
+export { createClient };

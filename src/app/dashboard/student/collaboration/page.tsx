@@ -4,43 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import Image from 'next/image';
 import {
-  PlusIcon,
-  XMarkIcon,
-  PencilIcon,
-  TrashIcon,
-  PaperClipIcon,
-  ArrowLeftIcon,
-  UserCircleIcon,
-  UserPlusIcon,
-  ArrowDownTrayIcon,
-  EllipsisHorizontalIcon,
-  Bars3Icon,
-  CheckIcon
+  PlusIcon, XMarkIcon, PencilIcon, TrashIcon, PaperClipIcon,
+  ArrowLeftIcon, UserCircleIcon, UserPlusIcon, ArrowDownTrayIcon,
+  EllipsisHorizontalIcon, Bars3Icon, CheckIcon, BellIcon
 } from '@heroicons/react/24/outline';
 
-// --- Types ---
-interface Attachment {
-  name: string;
-  url: string;
-  uploadedBy: string;
-  uploadedAt: string;
-}
-
-interface Card {
-  id: string;
-  title: string;
-  description?: string;
-  columnId: string;
-  attachments?: Attachment[];
-  dueDate?: string | null;
-}
-
-interface Column {
-  id: string;
-  title: string;
-  cardIds: string[];
-}
-
+// === Types ===
+interface Attachment { name: string; url: string; uploadedBy: string; uploadedAt: string; }
+interface Card { id: string; title: string; description?: string; columnId: string; attachments?: Attachment[]; dueDate?: string | null; }
+interface Column { id: string; title: string; cardIds: string[]; }
 interface Board {
   id: string;
   title: string;
@@ -50,130 +22,174 @@ interface Board {
   collaborator_ids: string[];
   owner_id: string;
 }
+interface UserProfile { id: string; email: string; display_name?: string; avatar_url?: string | null; }
+interface PendingInvite { id: string; board_id: string; board_title: string; invited_by_name: string; invited_by_avatar?: string | null; }
 
-// --- Delete Modal Types (fully typed) ---
-type DeleteType = 'card' | 'column' | 'attachment';
+// === Reusable Delete Modal ===
+const DeleteConfirmModal: React.FC<{
+  isOpen: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}> = ({ isOpen, title, message, onConfirm, onCancel }) => {
+  if (!isOpen) return null;
 
-interface DeletePayload {
-  card?: string;
-  column?: string;
-  attachment?: { cardId: string; index: number };
-}
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]" onClick={onCancel}>
+      <div className="bg-[#1a1a1e] rounded-3xl p-8 border border-white/20 max-w-md w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-2xl font-bold mb-4">{title}</h2>
+        <p className="text-gray-300 mb-8">{message}</p>
+        <div className="flex gap-4 justify-end">
+          <button onClick={onCancel} className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-2xl font-medium transition">
+            Cancel
+          </button>
+          <button
+            onClick={() => { onConfirm(); onCancel(); }}
+            className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-2xl font-bold transition"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default function CollaborationPage() {
-  // State
-  const [boards, setBoards] = useState<Board[]>([]);
+  // === State - Fixed never error ===
+const [boards, setBoards] = useState<Board[]>([] as Board[]);
   const [selectedBoard, setSelectedBoard] = useState<Board | null>(null);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
 
   // Modals
   const [cardModalOpen, setCardModalOpen] = useState(false);
   const [columnModalOpen, setColumnModalOpen] = useState(false);
-  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState('');
+  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [members, setMembers] = useState<UserProfile[]>([]);
 
-  // Delete Modal State
-  const [deleteModal, setDeleteModal] = useState<{
-    open: boolean;
-    type: DeleteType | null;
-    payload: DeletePayload | null;
-    title?: string;
-    message?: string;
-  }>({
-    open: false,
-    type: null,
-    payload: null,
+  // Feedback
+  const [alert, setAlert] = useState<{ open: boolean; type: 'success' | 'error'; title: string; message: string }>({
+    open: false, type: 'success', title: '', message: ''
   });
+
+  // Unified Delete Modal State
+  const [deleteModal, setDeleteModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+
+  const openDeleteModal = (title: string, message: string, onConfirm: () => void) => {
+    setDeleteModal({ isOpen: true, title, message, onConfirm });
+  };
+
+  const closeDeleteModal = () => setDeleteModal(prev => ({ ...prev, isOpen: false }));
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Auth ---
+  // === Auth ===
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
-      setCurrentUser(user as { id: string; email?: string } | null);
+      setCurrentUser(user ? { id: user.id, email: user.email } : null);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setCurrentUser(session?.user || null);
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
     });
 
-    return () => sub?.subscription.unsubscribe?.();
+    return () => listener?.subscription.unsubscribe();
   }, []);
 
-  // --- Load boards ---
+  // === Load Boards & Invites ===
   const loadBoards = useCallback(async () => {
     if (!currentUser) return;
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('shared_boards')
       .select('*')
       .or(`owner_id.eq.${currentUser.id},collaborator_ids.cs.{${currentUser.id}}`);
 
-    const fixed: Board[] = (data ?? []).map((b: Board) => ({
-      id: b.id,
-      title: b.title || 'My Board',
-      background_color: b.background_color || '#7c3aed',
-      owner_id: b.owner_id,
-      collaborator_ids: b.collaborator_ids || [],
-      columns: Array.isArray(b.columns) ? b.columns : [
+    if (error) {
+      setAlert({ open: true, type: 'error', title: 'Error', message: 'Failed to load boards' });
+      return;
+    }
+
+    const typedBoards: Board[] = (data ?? []).map((row): Board => ({
+      id: row.id,
+      title: row.title ?? 'Untitled Board',
+      background_color: row.background_color ?? '#7c3aed',
+      owner_id: row.owner_id,
+      collaborator_ids: row.collaborator_ids ?? [],
+      columns: Array.isArray(row.columns) ? row.columns : [
         { id: 'col1', title: 'To Do', cardIds: [] },
         { id: 'col2', title: 'In Progress', cardIds: [] },
-        { id: 'col3', title: 'Done', cardIds: [] }
+        { id: 'col3', title: 'Done', cardIds: [] },
       ],
-      cards: typeof b.cards === 'object' && b.cards !== null ? b.cards : {}
+      cards: typeof row.cards === 'object' && row.cards !== null ? row.cards : {},
     }));
-    setBoards(fixed);
+
+    setBoards(typedBoards);
+
+    const { data: invites } = await supabase
+      .from('board_invites')
+      .select(`id, board_id, board:shared_boards!board_id(id, title), inviter:users!invited_by(id, display_name, email, avatar_url)`)
+      .eq('invited_user_id', currentUser.id)
+      .eq('status', 'pending');
+
+    setPendingInvites((invites || []).map(i => {
+      const board = Array.isArray(i.board) ? i.board[0] : i.board;
+      const inviter = Array.isArray(i.inviter) ? i.inviter[0] : i.inviter;
+      return {
+        id: i.id,
+        board_id: i.board_id,
+        board_title: board?.title || 'Unknown Board',
+        invited_by_name: inviter?.display_name || inviter?.email?.split('@')[0] || 'Someone',
+        invited_by_avatar: inviter?.avatar_url || null,
+      };
+    }));
   }, [currentUser]);
 
-  const loadSingleBoard = useCallback(async () => {
-    if (!selectedBoard) return;
-    const { data } = await supabase.from('shared_boards').select('*').eq('id', selectedBoard.id).single();
-    if (data) {
-      setSelectedBoard({
-        ...data,
-        columns: Array.isArray(data.columns) ? data.columns : selectedBoard.columns,
-        cards: typeof data.cards === 'object' && data.cards !== null ? data.cards : selectedBoard.cards
-      });
-    }
-  }, [selectedBoard]);
-
-  // Real-time subscription
   useEffect(() => {
     loadBoards();
-    const channel = supabase
-      .channel('boards')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shared_boards' }, () => {
-        loadBoards();
-        if (selectedBoard) loadSingleBoard();
-      })
+    const channel = supabase.channel('boards')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shared_boards' }, loadBoards)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'board_invites' }, loadBoards)
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
-  }, [loadBoards, loadSingleBoard, selectedBoard]);
+  }, [loadBoards]);
 
-  // --- Helpers ---
+  // === Board Operations ===
   const saveBoard = async (updates: Partial<Board>) => {
     if (!selectedBoard) return;
     await supabase.from('shared_boards').update(updates).eq('id', selectedBoard.id);
-    await loadSingleBoard();
   };
 
-  // --- Delete Modal Helpers ---
-  const openDeleteModal = (
-    type: DeleteType,
-    payload: DeletePayload,
-    title?: string,
-    message?: string
-  ) => {
-    setDeleteModal({ open: true, type, payload, title, message });
+  const handleDeleteBoard = (e: React.MouseEvent, board: Board) => {
+    e.stopPropagation();
+    openDeleteModal(
+      `Delete "${board.title}"?`,
+      'This board and all its data will be permanently deleted.',
+      async () => {
+        await supabase.from('board_invites').delete().eq('board_id', board.id);
+        await supabase.from('shared_boards').delete().eq('id', board.id);
+        setBoards(prev => prev.filter(b => b.id !== board.id));
+        if (selectedBoard?.id === board.id) setSelectedBoard(null);
+        setAlert({ open: true, type: 'success', title: 'Success!', message: 'Board deleted successfully' });
+      }
+    );
   };
 
-  const closeDeleteModal = () => {
-    setDeleteModal({ open: false, type: null, payload: null });
-  };
-
-  // --- Column operations ---
+  // === Column Operations ===
   const addColumn = () => {
     if (!selectedBoard) return;
     const title = newColumnTitle.trim() || 'New Column';
@@ -185,6 +201,7 @@ export default function CollaborationPage() {
     setColumnModalOpen(false);
   };
 
+  // Fixed: Added missing renameColumn
   const renameColumn = (colId: string, newTitle: string) => {
     if (!selectedBoard) return;
     const updated = {
@@ -197,20 +214,24 @@ export default function CollaborationPage() {
 
   const deleteColumn = (colId: string) => {
     if (!selectedBoard) return;
-    const updated = {
-      ...selectedBoard,
-      columns: selectedBoard.columns.filter(c => c.id !== colId),
-      cards: Object.fromEntries(
-        Object.entries(selectedBoard.cards).filter(([, card]) => card.columnId !== colId)
-      )
-    };
-    setSelectedBoard(updated);
-    saveBoard({ columns: updated.columns, cards: updated.cards });
-    closeDeleteModal();
-  };
+    const column = selectedBoard.columns.find(c => c.id === colId);
+    if (!column) return;
 
-  const onColumnDragStart = (e: React.DragEvent, colId: string) => {
-    e.dataTransfer.setData('columnId', colId);
+    openDeleteModal(
+      `Delete "${column.title}"?`,
+      'This column and all its cards will be permanently deleted.',
+      () => {
+        const updated = {
+          ...selectedBoard,
+          columns: selectedBoard.columns.filter(c => c.id !== colId),
+          cards: Object.fromEntries(
+            Object.entries(selectedBoard.cards).filter(([, card]) => card.columnId !== colId)
+          ),
+        };
+        setSelectedBoard(updated);
+        saveBoard({ columns: updated.columns, cards: updated.cards });
+      }
+    );
   };
 
   const onColumnDrop = (e: React.DragEvent, targetIndex: number) => {
@@ -227,30 +248,30 @@ export default function CollaborationPage() {
     saveBoard({ columns: updated.columns });
   };
 
-  // --- Card operations ---
+  // === Card Operations ===
   const addCard = (columnId: string) => {
     if (!selectedBoard) return;
     const id = `card-${Date.now()}`;
-    const newCard: Card = { id, title: '', description: '', columnId, attachments: [], dueDate: null };
-    setEditingCard(newCard);
+    setEditingCard({ id, title: '', description: '', columnId, attachments: [], dueDate: null });
     setCardModalOpen(true);
   };
 
   const openCardForEdit = (cardId: string) => {
     if (!selectedBoard) return;
-    const c = selectedBoard.cards[cardId];
-    if (!c) return;
-    setEditingCard({ ...c });
+    const card = selectedBoard.cards[cardId];
+    if (!card) return;
+    setEditingCard({ ...card });
     setCardModalOpen(true);
   };
 
   const saveCard = () => {
     if (!selectedBoard || !editingCard) return;
-    const id = editingCard.id;
-    const isNew = !selectedBoard.cards[id];
-    const newCards = { ...selectedBoard.cards, [id]: { ...editingCard } };
-    const newColumns = selectedBoard.columns.map(c => c.id === editingCard.columnId ?
-      { ...c, cardIds: isNew ? [...c.cardIds, id] : c.cardIds } : c
+    const isNew = !selectedBoard.cards[editingCard.id];
+    const newCards = { ...selectedBoard.cards, [editingCard.id]: editingCard };
+    const newColumns = selectedBoard.columns.map(c =>
+      c.id === editingCard.columnId
+        ? { ...c, cardIds: isNew ? [...c.cardIds, editingCard.id] : c.cardIds }
+        : c
     );
     const updated = { ...selectedBoard, cards: newCards, columns: newColumns };
     setSelectedBoard(updated);
@@ -261,19 +282,25 @@ export default function CollaborationPage() {
 
   const deleteCard = (cardId: string) => {
     if (!selectedBoard) return;
-    const column = selectedBoard.columns.find(c => c.cardIds.includes(cardId));
-    const updated = {
-      ...selectedBoard,
-      columns: selectedBoard.columns.map(c =>
-        c.id === column?.id ? { ...c, cardIds: c.cardIds.filter(id => id !== cardId) } : c
-      ),
-      cards: Object.fromEntries(Object.entries(selectedBoard.cards).filter(([k]) => k !== cardId))
-    };
-    setSelectedBoard(updated);
-    saveBoard({ columns: updated.columns, cards: updated.cards });
-    setCardModalOpen(false);
-    setEditingCard(null);
-    closeDeleteModal();
+    const card = selectedBoard.cards[cardId];
+    openDeleteModal(
+      `Delete "${card?.title || 'Untitled Card'}"?`,
+      'This card and all attachments will be permanently deleted.',
+      () => {
+        const column = selectedBoard.columns.find(c => c.cardIds.includes(cardId));
+        const updated = {
+          ...selectedBoard,
+          columns: selectedBoard.columns.map(c =>
+            c.id === column?.id ? { ...c, cardIds: c.cardIds.filter(id => id !== cardId) } : c
+          ),
+          cards: Object.fromEntries(Object.entries(selectedBoard.cards).filter(([k]) => k !== cardId)),
+        };
+        setSelectedBoard(updated);
+        saveBoard({ columns: updated.columns, cards: updated.cards });
+        setCardModalOpen(false);
+        setEditingCard(null);
+      }
+    );
   };
 
   const moveCard = (cardId: string, targetColumnId: string) => {
@@ -296,90 +323,138 @@ export default function CollaborationPage() {
     saveBoard({ columns: updated.columns, cards: updated.cards });
   };
 
-  const onCardDragStart = (e: React.DragEvent, cardId: string) => {
-    e.dataTransfer.setData('cardId', cardId);
-    e.stopPropagation();
+  // === Invite & Members ===
+  const searchUsersByEmail = async (email: string) => {
+    if (!email.includes('@')) {
+      setSearchResults([]);
+      return;
+    }
+    setIsSearching(true);
+    const { data } = await supabase.from('users').select('id, email, display_name, avatar_url').ilike('email', `%${email}%`).limit(5);
+    setSearchResults(data || []);
+    setIsSearching(false);
   };
 
-  // File upload
+  const inviteUser = async (userId: string) => {
+    if (!selectedBoard || !currentUser) return;
+    try {
+      const { error } = await supabase.from('board_invites').insert({
+        board_id: selectedBoard.id,
+        invited_user_id: userId,
+        invited_by: currentUser.id,
+        status: 'pending'
+      });
+      if (error) throw error;
+
+      await fetch('/api/notifications/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toUserId: userId,
+          title: 'Board Invitation',
+          body: `${currentUser.email} invited you to "${selectedBoard.title}"`,
+          data: { type: 'board_invite', board_id: selectedBoard.id }
+        })
+      });
+
+      setAlert({ open: true, type: 'success', title: 'Success!', message: 'Invite sent!' });
+      setInviteEmail('');
+      setSearchResults([]);
+    } catch (err) {
+      console.error(err);
+      setAlert({ open: true, type: 'error', title: 'Error', message: 'Failed to send invite' });
+    }
+  };
+
+  const acceptInvite = async (inviteId: string, boardId: string) => {
+    if (!currentUser) return;
+    try {
+      await supabase.from('board_invites').update({ status: 'accepted' }).eq('id', inviteId);
+      const { data } = await supabase.from('shared_boards').select('collaborator_ids').eq('id', boardId).single();
+      const updated = [...(data?.collaborator_ids || []), currentUser.id];
+      await supabase.from('shared_boards').update({ collaborator_ids: updated }).eq('id', boardId);
+      await loadBoards();
+      setAlert({ open: true, type: 'success', title: 'Success!', message: 'You joined the board!' });
+    } catch (err) {
+      console.error(err);
+      setAlert({ open: true, type: 'error', title: 'Error', message: 'Failed to accept invite' });
+    }
+  };
+
+  // Load members
+  useEffect(() => {
+    if (!inviteModalOpen || !selectedBoard || !currentUser) return;
+    const fetchMembers = async () => {
+      const memberIds = [selectedBoard.owner_id, ...selectedBoard.collaborator_ids].filter(id => id !== currentUser.id);
+      const { data } = await supabase.from('users').select('id, email, display_name, avatar_url').in('id', memberIds);
+      const { data: self } = await supabase.from('users').select('id, email, display_name, avatar_url').eq('id', currentUser.id).single();
+      setMembers([...(data || []), ...(self ? [self] : [])]);
+    };
+    fetchMembers();
+  }, [inviteModalOpen, selectedBoard, currentUser]);
+
+  // === File Upload & Attachments ===
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editingCard || !selectedBoard || !currentUser) return;
-    const cardId = editingCard.id;
+
     const fileExt = file.name.split('.').pop() || '';
     const fileName = `${crypto.randomUUID()}.${fileExt}`;
-    const path = `${selectedBoard.id}/${cardId}/${fileName}`;
-    const { error } = await supabase.storage.from('board-attachments').upload(path, file);
-    if (error) return alert('Upload failed: ' + error.message);
+    const path = `${selectedBoard.id}/${editingCard.id}/${fileName}`;
 
-    const { data: publicData } = supabase.storage.from('board-attachments').getPublicUrl(path);
-    const publicUrl = publicData?.publicUrl || '';
+    const { error } = await supabase.storage.from('board-attachments').upload(path, file);
+    if (error) {
+      setAlert({ open: true, type: 'error', title: 'Upload Failed', message: error.message });
+      return;
+    }
+
+    const { data: urlData } = supabase.storage.from('board-attachments').getPublicUrl(path);
+    const publicUrl = urlData?.publicUrl || '';
+
     const newAtt: Attachment = {
       name: file.name,
       url: publicUrl,
       uploadedBy: currentUser.email || 'You',
-      uploadedAt: new Date().toISOString()
+      uploadedAt: new Date().toISOString(),
     };
 
-    setEditingCard(prev => prev ? { ...prev, attachments: [...(prev.attachments || []), newAtt] } : prev);
+    const updatedCard = { ...editingCard, attachments: [...(editingCard.attachments || []), newAtt] };
+    setEditingCard(updatedCard);
 
-    const updatedCard = { ...(selectedBoard.cards[cardId] || {}), attachments: [...((selectedBoard.cards[cardId]?.attachments) || []), newAtt] } as Card;
-    const updatedBoard = { ...selectedBoard, cards: { ...selectedBoard.cards, [cardId]: updatedCard } };
+    const updatedBoard = {
+      ...selectedBoard,
+      cards: { ...selectedBoard.cards, [editingCard.id]: updatedCard },
+    };
     setSelectedBoard(updatedBoard);
     await saveBoard({ cards: updatedBoard.cards });
   };
 
-  const deleteAttachment = async (cardId: string, index: number) => {
+  const deleteAttachment = (cardId: string, index: number) => {
     if (!selectedBoard) return;
     const card = selectedBoard.cards[cardId];
     if (!card) return;
+
     const newAttachments = (card.attachments || []).filter((_, i) => i !== index);
     const updatedCard = { ...card, attachments: newAttachments };
     const updatedBoard = { ...selectedBoard, cards: { ...selectedBoard.cards, [cardId]: updatedCard } };
+
     setSelectedBoard(updatedBoard);
-    await saveBoard({ cards: updatedBoard.cards });
-    setEditingCard(prev => prev && prev.id === cardId ? { ...prev, attachments: newAttachments } : prev);
-    closeDeleteModal();
+    saveBoard({ cards: updatedBoard.cards });
+    setEditingCard(prev => prev?.id === cardId ? { ...prev, attachments: newAttachments } : prev);
   };
 
-  // Attachment Item
-  const AttachmentItem = ({
-    attachment,
-    cardId,
-    index
-  }: {
-    attachment: Attachment;
-    cardId?: string;
-    index?: number;
-  }) => {
+  // === Attachment Item Component ===
+  const AttachmentItem = ({ attachment, cardId, index }: { attachment: Attachment; cardId?: string; index?: number }) => {
     const isImage = /\.(jpe?g|png|gif|webp)$/i.test(attachment.name);
-    const isPDF = attachment.name.toLowerCase().endsWith('.pdf');
     const [menuOpen, setMenuOpen] = useState(false);
 
-    const downloadFile = async (url: string, name: string) => {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(blobUrl);
-    };
-
     return (
-      <div className="group flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-all hover:border-purple-500/50">
-        <div className="w-12 h-12 rounded-lg overflow-hidden border border-white/20 flex-shrink-0">
+      <div className="group flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-all">
+        <div className="w-12 h-12 rounded-lg overflow-hidden border border-white/20">
           {isImage ? (
             <button onClick={() => setPreviewImage(attachment.url)} className="w-full h-full">
-              <Image src={attachment.url} alt={attachment.name} width={48} height={48} className="w-full h-full object-cover" unoptimized />
+              <Image src={attachment.url} alt="" width={48} height={48} className="object-cover" unoptimized />
             </button>
-          ) : isPDF ? (
-            <div className="w-full h-full bg-red-500/20 flex items-center justify-center">
-              <span className="text-xs font-bold text-red-400">PDF</span>
-            </div>
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
               <PaperClipIcon className="w-6 h-6 text-purple-400" />
@@ -390,149 +465,199 @@ export default function CollaborationPage() {
         <div className="flex-1 min-w-0">
           <p className="font-medium truncate">{attachment.name}</p>
           <p className="text-sm text-gray-400">
-            Added {new Date(attachment.uploadedAt).toLocaleString()} • by {attachment.uploadedBy}
+            {new Date(attachment.uploadedAt).toLocaleDateString()} • by {attachment.uploadedBy}
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <button onClick={() => downloadFile(attachment.url, attachment.name)} className="p-2 hover:bg-white/10 rounded" title="Download">
+        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+          <button onClick={() => {
+            const a = document.createElement('a');
+            a.href = attachment.url;
+            a.download = attachment.name;
+            a.click();
+          }} title="Download">
             <ArrowDownTrayIcon className="w-5 h-5" />
           </button>
-
-          <div className="relative">
-            <button onClick={() => setMenuOpen(v => !v)} className="p-2 hover:bg-white/10 rounded">
-              <EllipsisHorizontalIcon className="w-5 h-5" />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 mt-2 w-40 bg-[#111116] border border-white/10 rounded-lg shadow-lg z-50">
-                <button
-                  onClick={() => {
-                    if (cardId != null && index != null) {
+          {cardId !== undefined && index !== undefined && (
+            <div className="relative">
+              <button onClick={() => setMenuOpen(!menuOpen)}>
+                <EllipsisHorizontalIcon className="w-5 h-5" />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-40 bg-[#111116] border border-white/10 rounded-lg shadow-lg z-50">
+                  <button
+                    onClick={() => {
                       openDeleteModal(
-                        'attachment',
-                        { attachment: { cardId, index } },
                         `Delete "${attachment.name}"?`,
-                        'This file will be removed from the card.'
+                        'This file will be removed from the card.',
+                        () => { deleteAttachment(cardId, index); setMenuOpen(false); }
                       );
-                    }
-                    setMenuOpen(false);
-                  }}
-                  className="w-full text-left px-4 py-3 hover:bg-red-600/20 text-red-400"
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </div>
+                    }}
+                    className="w-full text-left px-4 py-3 hover:bg-red-600/20 text-red-400"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
   };
 
-  // Reset modals when board changes
-  useEffect(() => {
-    setCardModalOpen(false);
-    setEditingCard(null);
-  }, [selectedBoard?.id]);
-
-  // --- Delete Confirmation Modal Component ---
-  const DeleteConfirmModal = ({
-    isOpen,
-    title = "Delete this item?",
-    message = "This action cannot be undone.",
-    onConfirm,
-    onCancel,
-  }: {
-    isOpen: boolean;
-    title?: string;
-    message?: string;
-    onConfirm: () => void;
-    onCancel: () => void;
-  }) => {
-    if (!isOpen) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]" onClick={onCancel}>
-        <div className="bg-[#1a1a1e] rounded-3xl p-8 border border-white/20 max-w-md w-full" onClick={e => e.stopPropagation()}>
-          <h2 className="text-2xl font-bold mb-4">{title}</h2>
-          <p className="text-gray-300 mb-8">{message}</p>
-          <div className="flex gap-4 justify-end">
-            <button onClick={onCancel} className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-2xl font-medium transition">
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                onConfirm();
-                onCancel();
-              }}
-              className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-2xl font-bold transition"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- UI ---
+  // === Render: Board List ===
   if (!selectedBoard) {
     return (
       <div className="fixed inset-0 bg-[#0d0d0f] text-white flex flex-col">
+        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/10 backdrop-blur-xl bg-black/40">
-          <button onClick={() => window.history.back()} className="p-3 hover:bg-white/10 rounded-xl"><ArrowLeftIcon className="w-7 h-7" /></button>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">Collaborative Boards</h1>
-          <div className="w-14" />
+          <button onClick={() => window.history.back()} className="p-3 hover:bg-white/10 rounded-xl">
+            <ArrowLeftIcon className="w-7 h-7" />
+          </button>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+            Collaborative Boards
+          </h1>
+          <div className="relative">
+            {pendingInvites.length > 0 && (
+              <>
+                <BellIcon className="w-8 h-8 text-purple-400 animate-pulse" />
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full" />
+              </>
+            )}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-10">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex justify-between items-center mb-12">
-              <h2 className="text-5xl font-bold">Your Boards</h2>
-              <button onClick={async () => {
-                if (!currentUser) return;
-                const title = prompt('Board name:') || 'New Board';
-                await supabase.from('shared_boards').insert({
-                  title,
-                  owner_id: currentUser.id,
-                  background_color: '#7c3aed',
-                  columns: [],
-                  cards: {},
-                  collaborator_ids: []
-                });
-                loadBoards();
-              }} className="bg-gradient-to-r from-pink-500 to-purple-600 px-8 py-5 rounded-3xl font-bold text-xl shadow-2xl hover:scale-105 transition flex items-center gap-4">
-                <PlusIcon className="w-8 h-8" /> New Board
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-8">
-              {boards.map(b => (
-                <div key={b.id} onClick={() => setSelectedBoard(b)} className="cursor-pointer group">
-                  <div className="bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 hover:border-purple-500 transition-all hover:scale-105 shadow-2xl">
-                    <div className="w-full h-48 rounded-2xl mb-6" style={{ backgroundColor: b.background_color }} />
-                    <h3 className="text-3xl font-bold">{b.title}</h3>
-                    <p className="text-gray-400 mt-3 flex items-center gap-2"><UserCircleIcon className="w-5 h-5" /> {b.collaborator_ids.length + 1} members</p>
+
+        {/* Pending Invites */}
+        {pendingInvites.length > 0 && (
+          <div className="p-6 bg-gradient-to-r from-purple-900/50 to-pink-900/50 border-b border-white/10">
+            <h2 className="text-xl font-bold mb-4">Pending Invites</h2>
+            <div className="space-y-3">
+              {pendingInvites.map(invite => (
+                <div key={invite.id} className="bg-white/10 rounded-xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold">
+                      {invite.invited_by_name[0]}
+                    </div>
+                    <div>
+                      <p className="font-medium">{invite.invited_by_name} invited you</p>
+                      <p className="text-purple-300 font-bold">{invite.board_title}</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => acceptInvite(invite.id, invite.board_id)}
+                    className="px-6 py-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl font-bold hover:scale-105 transition"
+                  >
+                    Accept
+                  </button>
                 </div>
               ))}
             </div>
           </div>
+        )}
+
+        {/* Boards Grid */}
+        <div className="flex-1 overflow-y-auto p-10">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex justify-between items-center mb-12">
+              <h2 className="text-5xl font-bold">Your Boards</h2>
+              <button
+                onClick={async () => {
+                  if (!currentUser) return;
+                  const title = prompt('Board name:') || 'New Board';
+                  await supabase.from('shared_boards').insert({
+                    title, owner_id: currentUser.id, background_color: '#7c3aed',
+                    columns: [], cards: {}, collaborator_ids: []
+                  });
+                  loadBoards();
+                }}
+                className="bg-gradient-to-r from-pink-500 to-purple-600 px-8 py-5 rounded-3xl font-bold text-xl shadow-2xl hover:scale-105 transition flex items-center gap-4"
+              >
+                <PlusIcon className="w-8 h-8" /> New Board
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-8">
+              {boards.map(board => {
+                const isOwner = currentUser?.id === board.owner_id;
+                const isActive = selectedBoard === board.id;
+
+                return (
+                  <div key={board.id} className={`relative group transition-all ${isActive ? 'opacity-60 pointer-events-none' : ''}`}>
+                    <div onClick={() => setSelectedBoard(board)} className="absolute inset-0 rounded-3xl z-10 cursor-pointer" />
+
+                    {isOwner && (
+                      <button
+                        onClick={(e) => handleDeleteBoard(e, board)}
+                        className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-all p-3 bg-red-600/20 hover:bg-red-600/40 backdrop-blur-md rounded-xl border border-red-500/50 hover:scale-110 shadow-lg"
+                        title="Delete board"
+                      >
+                        <TrashIcon className="w-6 h-6 text-red-400" />
+                      </button>
+                    )}
+
+                    <div className="relative bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 hover:border-purple-500 hover:scale-105 shadow-2xl transition-all group-hover:shadow-purple-500/20">
+                      <div className="w-full h-48 rounded-2xl mb-6 overflow-hidden" style={{ backgroundColor: board.background_color }} />
+                      <h3 className="text-3xl font-bold">{board.title}</h3>
+                      <p className="text-gray-400 mt-3 flex items-center gap-2">
+                        <UserCircleIcon className="w-5 h-5" />
+                        {board.collaborator_ids.length + 1} members
+                      </p>
+                      {isOwner && (
+                        <span className="inline-block mt-4 px-4 py-1 text-xs font-bold bg-gradient-to-r from-purple-600 to-pink-600 rounded-full">
+                          Owner
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
+
+        {/* Modals */}
+        <DeleteConfirmModal
+          isOpen={deleteModal.isOpen}
+          title={deleteModal.title}
+          message={deleteModal.message}
+          onConfirm={deleteModal.onConfirm}
+          onCancel={closeDeleteModal}
+        />
+
+        {alert.open && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]" onClick={() => setAlert({ ...alert, open: false })}>
+            <div className={`rounded-3xl p-8 max-w-md w-full mx-4 shadow-2xl animate-in fade-in zoom-in duration-300 ${alert.type === 'success' ? 'bg-gradient-to-br from-purple-600 to-pink-600' : 'bg-gradient-to-br from-red-600 to-orange-600'}`} onClick={e => e.stopPropagation()}>
+              <div className="text-center">
+                <div className="w-20 h-20 mx-auto mb-6 bg-white/20 rounded-full flex items-center justify-center">
+                  {alert.type === 'success' ? <CheckIcon className="w-12 h-12 text-white" /> : <XMarkIcon className="w-12 h-12 text-white" />}
+                </div>
+                <h2 className="text-3xl font-bold text-white mb-4">{alert.title}</h2>
+                <p className="text-white/90 text-lg mb-8">{alert.message}</p>
+                <button onClick={() => setAlert({ ...alert, open: false })} className="px-8 py-4 bg-white text-purple-600 rounded-2xl font-bold hover:scale-105 transition">
+                  {alert.type === 'success' ? 'Awesome!' : 'Try Again'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
+  // === Board View ===
   return (
     <div className="fixed inset-0 bg-[#0d0d0f] text-white flex flex-col">
-      {/* Header */}
       <div className="flex items-center justify-between p-6 border-b border-white/10 backdrop-blur-xl bg-black/40">
-        <button onClick={() => setSelectedBoard(null)} className="p-3 hover:bg-white/10 rounded-xl"><ArrowLeftIcon className="w-7 h-7" /></button>
+        <button onClick={() => setSelectedBoard(null)} className="p-3 hover:bg-white/10 rounded-xl">
+          <ArrowLeftIcon className="w-7 h-7" />
+        </button>
         <h1 className="text-4xl font-bold">{selectedBoard.title}</h1>
-        <button className="px-6 py-3 bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl font-bold hover:scale-105 transition flex items-center gap-3">
+        <button onClick={() => setInviteModalOpen(true)} className="px-6 py-3 bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl font-bold hover:scale-105 transition flex items-center gap-3">
           <UserPlusIcon className="w-6 h-6" /> Invite
         </button>
       </div>
 
-      {/* Board */}
       <div className="flex-1 overflow-y-auto p-8">
         <div className="flex gap-6 pb-20 min-w-max">
           {selectedBoard.columns.map((column, colIndex) => (
@@ -541,11 +666,10 @@ export default function CollaborationPage() {
                 <h3 className="text-xl font-bold flex items-center gap-2">
                   <div
                     draggable
-                    onDragStart={e => onColumnDragStart(e, column.id)}
+                    onDragStart={e => e.dataTransfer.setData('columnId', column.id)}
                     onDragOver={e => e.preventDefault()}
                     onDrop={e => onColumnDrop(e, colIndex)}
                     className="p-2 rounded hover:bg-white/5 cursor-grab"
-                    title="Drag column"
                   >
                     <Bars3Icon className="w-5 h-5 text-gray-500" />
                   </div>
@@ -553,22 +677,20 @@ export default function CollaborationPage() {
                   <span className="ml-2 text-white/50">({column.cardIds.length})</span>
                 </h3>
                 <div className="flex gap-1">
-                  <button onClick={() => setEditingColumnId(column.id)} className="p-1 hover:bg-white/10 rounded"><PencilIcon className="w-4 h-4" /></button>
-                  <button
-                    onClick={() => openDeleteModal(
-                      'column',
-                      { column: column.id },
-                      `Delete "${column.title}"?`,
-                      'This column and all its cards will be permanently deleted.'
-                    )}
-                    className="p-1 hover:bg-white/10 rounded"
-                  >
+                  <button onClick={() => setEditingColumnId(column.id)} className="p-1 hover:bg-white/10 rounded">
+                    <PencilIcon className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => deleteColumn(column.id)} className="p-1 hover:bg-white/10 rounded">
                     <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-3 min-h-[20px]" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const cardId = e.dataTransfer.getData('cardId'); if (cardId) moveCard(cardId, column.id); }}>
+              <div className="space-y-3 min-h-[20px]" onDragOver={e => e.preventDefault()} onDrop={e => {
+                e.preventDefault();
+                const cardId = e.dataTransfer.getData('cardId');
+                if (cardId) moveCard(cardId, column.id);
+              }}>
                 {column.cardIds.map(cardId => {
                   const card = selectedBoard.cards[cardId];
                   if (!card) return null;
@@ -576,13 +698,13 @@ export default function CollaborationPage() {
                     <div
                       key={card.id}
                       draggable
-                      onDragStart={e => onCardDragStart(e, card.id)}
+                      onDragStart={e => e.dataTransfer.setData('cardId', card.id)}
                       onClick={() => openCardForEdit(card.id)}
                       className="bg-white/10 rounded-xl p-4 cursor-pointer hover:bg-white/20 transition border border-white/20"
                     >
                       <h4 className="font-medium">{card.title || 'Untitled'}</h4>
                       {card.attachments?.length ? <div className="mt-2 text-xs text-purple-400 flex items-center gap-1"><PaperClipIcon className="w-3 h-3" /> {card.attachments.length}</div> : null}
-                      {card.dueDate ? <div className="mt-2 text-xs text-orange-300">Due: {new Date(card.dueDate).toLocaleDateString()}</div> : null}
+                      {card.dueDate && <div className="mt-2 text-xs text-orange-300">Due: {new Date(card.dueDate).toLocaleDateString()}</div>}
                     </div>
                   );
                 })}
@@ -600,7 +722,7 @@ export default function CollaborationPage() {
         </div>
       </div>
 
-      {/* Card Modal */}
+      {/* All Modals Below */}
       {cardModalOpen && editingCard && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-8" onClick={() => { setCardModalOpen(false); setEditingCard(null); }}>
           <div onClick={e => e.stopPropagation()} className="bg-[#1a1a1e] rounded-3xl max-w-4xl w-full max-h-screen overflow-y-auto border border-white/20 shadow-2xl">
@@ -619,7 +741,7 @@ export default function CollaborationPage() {
               </div>
 
               <textarea
-                value={editingCard.description}
+                value={editingCard.description || ''}
                 onChange={e => setEditingCard(prev => prev ? { ...prev, description: e.target.value } : prev)}
                 placeholder="Add description..."
                 className="w-full bg-white/10 rounded-2xl p-6 text-white placeholder-gray-500 resize-none focus:ring-4 focus:ring-purple-500/50 outline-none"
@@ -657,15 +779,7 @@ export default function CollaborationPage() {
                 </button>
                 <button onClick={() => { setCardModalOpen(false); setEditingCard(null); }} className="px-8 py-4 bg-white/10 rounded-2xl">Cancel</button>
                 {selectedBoard.cards[editingCard.id] && (
-                  <button
-                    onClick={() => openDeleteModal(
-                      'card',
-                      { card: editingCard.id },
-                      'Delete this card?',
-                      'All attachments and data will be permanently removed.'
-                    )}
-                    className="px-8 py-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-2xl font-bold transition"
-                  >
+                  <button onClick={() => deleteCard(editingCard.id)} className="px-8 py-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-2xl font-bold transition">
                     Delete Card
                   </button>
                 )}
@@ -675,7 +789,6 @@ export default function CollaborationPage() {
         </div>
       )}
 
-      {/* Image Preview Modal */}
       {previewImage && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[9999]">
           <button onClick={() => setPreviewImage(null)} className="absolute top-6 left-6 bg-white/10 hover:bg-white/20 p-3 rounded-xl">
@@ -687,7 +800,6 @@ export default function CollaborationPage() {
         </div>
       )}
 
-      {/* Add Column Modal */}
       {columnModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setColumnModalOpen(false)}>
           <div onClick={e => e.stopPropagation()} className="bg-[#1a1a1e] rounded-3xl p-8 border border-white/20">
@@ -707,37 +819,147 @@ export default function CollaborationPage() {
         </div>
       )}
 
-      {/* Inline Column Rename */}
       {editingColumnId && selectedBoard && (
         <input
           defaultValue={selectedBoard.columns.find(c => c.id === editingColumnId)?.title || ''}
           onBlur={e => { renameColumn(editingColumnId, e.target.value.trim() || 'Untitled'); setEditingColumnId(null); }}
           onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
-          className="fixed left-1/2 top-20 transform -translate-x-1/2 bg-white/10 rounded-lg px-3 py-1 outline-none focus:ring-2 focus:ring-purple-500 text-xl font-bold"
+          className="fixed left-1/2 top-20 -translate-x-1/2 bg-white/10 rounded-lg px-3 py-1 outline-none focus:ring-2 focus:ring-purple-500 text-xl font-bold"
           autoFocus
-          onClick={e => e.stopPropagation()}
         />
       )}
 
-      {/* Delete Confirmation Modal */}
-      <DeleteConfirmModal
-        isOpen={deleteModal.open}
-        title={deleteModal.title || 'Delete?'}
-        message={deleteModal.message || 'This action cannot be undone.'}
-        onCancel={closeDeleteModal}
-        onConfirm={() => {
-          if (!selectedBoard || !deleteModal.payload) return;
+      {inviteModalOpen && selectedBoard && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]" onClick={() => setInviteModalOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="bg-[#1a1a1e] rounded-2xl border border-white/20 w-full max-w-lg mx-4 shadow-2xl">
+            <div className="p-6 border-b border-white/10">
+              <h2 className="text-2xl font-bold">Invite to Board</h2>
+              <p className="text-gray-400 mt-1">They will receive a push notification</p>
+            </div>
 
-          if (deleteModal.type === 'card' && deleteModal.payload.card) {
-            deleteCard(deleteModal.payload.card);
-          } else if (deleteModal.type === 'column' && deleteModal.payload.column) {
-            deleteColumn(deleteModal.payload.column);
-          } else if (deleteModal.type === 'attachment' && deleteModal.payload.attachment) {
-            const { cardId, index } = deleteModal.payload.attachment;
-            deleteAttachment(cardId, index);
-          }
-        }}
+            <div className="p-6">
+              <div className="relative">
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={e => { setInviteEmail(e.target.value); searchUsersByEmail(e.target.value); }}
+                  placeholder="Enter email address..."
+                  className="w-full px-5 py-4 bg-white/10 rounded-xl outline-none focus:ring-4 focus:ring-purple-500/50 text-white placeholder-gray-500"
+                  autoFocus
+                />
+                {inviteEmail && (
+                  <div className="absolute top-full mt-2 w-full bg-[#111116] border border-white/20 rounded-xl shadow-2xl z-10">
+                    {isSearching ? (
+                      <div className="p-4 text-center text-gray-400">Searching...</div>
+                    ) : searchResults.length === 0 ? (
+                      <div className="p-4 text-center text-gray-400">No users found</div>
+                    ) : (
+                      searchResults.map(user => {
+                        const isAdded = selectedBoard.collaborator_ids.includes(user.id) || user.id === selectedBoard.owner_id;
+                        return (
+                          <button
+                            key={user.id}
+                            onClick={() => !isAdded && inviteUser(user.id)}
+                            disabled={isAdded}
+                            className={`w-full px-4 py-3 flex items-center gap-4 hover:bg-white/10 transition ${isAdded ? 'opacity-50' : ''}`}
+                          >
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg">
+                              {(user.display_name || user.email)[0].toUpperCase()}
+                            </div>
+                            <div className="text-left flex-1">
+                              <p className="font-medium">{user.display_name || user.email.split('@')[0]}</p>
+                              <p className="text-sm text-gray-400">{user.email}</p>
+                            </div>
+                            {isAdded ? <span className="text-green-400 text-sm">Added</span> : <PlusIcon className="w-5 h-5 text-purple-400" />}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8">
+                <h3 className="text-lg font-semibold mb-4">Members ({selectedBoard.collaborator_ids.length + 1})</h3>
+                <div className="space-y-3">
+                  {members.map(user => {
+                    const isOwner = user.id === selectedBoard.owner_id;
+                    const isYou = user.id === currentUser?.id;
+                    const canRemove = currentUser?.id === selectedBoard.owner_id && !isOwner && !isYou;
+                    const canLeave = !isOwner && isYou;
+
+                    const handleRemoveOrLeave = async () => {
+                      const newCollabs = selectedBoard.collaborator_ids.filter(id => id !== user.id);
+                      await supabase.from('shared_boards').update({ collaborator_ids: newCollabs }).eq('id', selectedBoard.id);
+                      setSelectedBoard(prev => prev ? { ...prev, collaborator_ids: newCollabs } : prev);
+                      setMembers(prev => prev.filter(m => m.id !== user.id));
+                      if (isYou) { setInviteModalOpen(false); setSelectedBoard(null); }
+                    };
+
+                    return (
+                      <div key={user.id} className="flex items-center gap-4 px-4 py-3 bg-white/5 rounded-xl group">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg">
+                          {(user.display_name || user.email)[0].toUpperCase()}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium">
+                            {isYou ? 'You' : user.display_name || user.email.split('@')[0]}
+                            {isOwner && ' (Owner)'}
+                          </p>
+                          <p className="text-sm text-gray-400">{user.email}</p>
+                        </div>
+                        {(canRemove || canLeave) && (
+                          <button
+                            onClick={() => openDeleteModal(
+                              canLeave ? 'Leave board?' : `Remove ${user.display_name || user.email.split('@')[0]}?`,
+                              canLeave ? "You'll lose access unless invited again." : 'They will lose access to this board.',
+                              handleRemoveOrLeave
+                            )}
+                            className={`p-2 rounded-lg transition ${canRemove ? 'opacity-0 group-hover:opacity-100 hover:bg-red-600/30 text-red-400' : 'text-orange-400 hover:bg-orange-600/20'}`}
+                          >
+                            {canRemove ? <XMarkIcon className="w-5 h-5" /> : <span className="text-xs font-bold">Leave</span>}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-white/10 flex justify-end">
+              <button onClick={() => { setInviteModalOpen(false); setInviteEmail(''); setSearchResults([]); }} className="px-8 py-3 bg-white/10 hover:bg-white/20 rounded-xl font-medium transition">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        title={deleteModal.title}
+        message={deleteModal.message}
+        onConfirm={deleteModal.onConfirm}
+        onCancel={closeDeleteModal}
       />
+
+      {alert.open && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]" onClick={() => setAlert({ ...alert, open: false })}>
+          <div className={`rounded-3xl p-8 max-w-md w-full mx-4 shadow-2xl animate-in fade-in zoom-in duration-300 ${alert.type === 'success' ? 'bg-gradient-to-br from-purple-600 to-pink-600' : 'bg-gradient-to-br from-red-600 to-orange-600'}`} onClick={e => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="w-20 h-20 mx-auto mb-6 bg-white/20 rounded-full flex items-center justify-center">
+                {alert.type === 'success' ? <CheckIcon className="w-12 h-12 text-white" /> : <XMarkIcon className="w-12 h-12 text-white" />}
+              </div>
+              <h2 className="text-3xl font-bold text-white mb-4">{alert.title}</h2>
+              <p className="text-white/90 text-lg mb-8">{alert.message}</p>
+              <button onClick={() => setAlert({ ...alert, open: false })} className="px-8 py-4 bg-white text-purple-600 rounded-2xl font-bold hover:scale-105 transition">
+                {alert.type === 'success' ? 'Awesome!' : 'Try Again'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
