@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
-  const supabase = createClient();
+  const supabase = await createClient(); // Remove await here
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -21,7 +21,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const supabase = createClient();
+  const supabase = await createClient(); // Remove await here
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -73,31 +73,4 @@ export async function PUT(req: Request) {
     .single();
 
   return NextResponse.json({ data, error });
-}
-
-export async function DELETE(req: Request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Get the ID from the URL
-  const url = new URL(req.url);
-  const id = url.pathname.split('/').pop();
-
-  if (!id) {
-    return NextResponse.json({ error: "Missing assignment ID" }, { status: 400 });
-  }
-
-  const { error } = await supabase
-    .from("assignments")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id);
-
-  return NextResponse.json({ success: !error, error });
 }

@@ -44,20 +44,6 @@ export default function StudyPlansPage() {
   const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
   const [streak, setStreak] = useState(0);
 
-  const loadProgress = useCallback((planId: string) => {
-    const saved = localStorage.getItem(`studyplan_${planId}`);
-    if (saved) {
-      try {
-        const days = JSON.parse(saved);
-        setCompletedDays(new Set(days));
-      } catch {
-        setCompletedDays(new Set());
-      }
-    } else {
-      setCompletedDays(new Set());
-    }
-  }, []);
-
   const loadPlans = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -71,67 +57,74 @@ export default function StudyPlansPage() {
     setPlans(data || []);
     if (data?.length && !selectedPlan) {
       setSelectedPlan(data[0]);
-      loadProgress(data[0].id);
+      await loadProgress(data[0]);
     }
-  }, [selectedPlan, loadProgress]);
+  }, [selectedPlan]);
+
+  // Load real progress from Supabase progress table
+  const loadProgress = async (plan: StudyPlan) => {
+    if (!plan.course_id) {
+      setCompletedDays(new Set());
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data } = await supabase
+      .from('progress')
+      .select('completed_tasks')
+      .eq('user_id', user.id)
+      .eq('course_id', plan.course_id)
+      .maybeSingle(); // Use maybeSingle to avoid error if no row
+
+    const completed = data?.completed_tasks || 0;
+    const days = new Set<number>();
+    for (let i = 1; i <= completed; i++) days.add(i);
+    setCompletedDays(days);
+  };
+
+  // Load real streak from gamification table
+  const loadStreak = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data } = await supabase
+      .from('gamification')
+      .select('current_streak')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    setStreak(data?.current_streak || 0);
+  };
 
   useEffect(() => {
     loadPlans();
     loadStreak();
   }, [loadPlans]);
 
-  const loadStreak = () => {
-    const today = new Date().toDateString();
-    const lastVisit = localStorage.getItem('last_study_date') || '';
-    const currentStreak = parseInt(localStorage.getItem('study_streak') || '0', 10);
+  // Sync progress + trigger real streak update
+  const syncProgress = async () => {
+    if (!selectedPlan?.course_id) return;
 
-    if (lastVisit === today) {
-      setStreak(currentStreak);
-      return;
-    }
-
-    const yesterday = new Date(Date.now() - 86400000).toDateString();
-    const newStreak = lastVisit === yesterday ? currentStreak + 1 : 1;
-
-    localStorage.setItem('study_streak', String(newStreak));
-    localStorage.setItem('last_study_date', today);
-    setStreak(newStreak);
-  };
-
-  const syncCourseProgress = async (courseId: string | null) => {
-    if (!courseId) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: allPlans } = await supabase
-      .from('ai_study_plans')
-      .select('id, content')
-      .eq('user_id', user.id)
-      .eq('course_id', courseId);
-
-    let totalDays = 0;
-    let completedDaysCount = 0;
-
-    allPlans?.forEach(plan => {
-      totalDays += plan.content.schedule.length;
-      const saved = localStorage.getItem(`studyplan_${plan.id}`);
-      if (saved) {
-        try {
-          completedDaysCount += JSON.parse(saved).length;
-        } catch {}
-      }
-    });
-
-    const percent = totalDays > 0 ? Math.round((completedDaysCount / totalDays) * 100) : 0;
+    const totalDays = selectedPlan.content.schedule.length;
+    const completedCount = completedDays.size;
 
     await supabase.from('progress').upsert({
       user_id: user.id,
-      course_id: courseId,
-      progress_percent: percent,
-      completed_tasks: completedDaysCount,
+      course_id: selectedPlan.course_id,
+      completed_tasks: completedCount,
       total_tasks: totalDays,
+      progress_percent: Math.round((completedCount / totalDays) * 100),
       updated_at: new Date().toISOString(),
     });
+
+    // This calls your SQL function → real streak
+    await supabase.rpc('update_study_streak', { p_user_id: user.id });
+    await loadStreak();
   };
 
   const toggleDay = async (day: number) => {
@@ -140,18 +133,16 @@ export default function StudyPlansPage() {
     const newSet = new Set(completedDays);
     const wasCompleted = newSet.has(day);
     const totalDays = selectedPlan.content.schedule.length;
-    const willCompletePlan = !wasCompleted && newSet.size + 1 === totalDays;
-    const rewardGiven = localStorage.getItem(`plan_completed_reward_${selectedPlan.id}`) === 'true';
+    const willComplete = !wasCompleted && newSet.size + 1 === totalDays;
+    const rewardGiven = localStorage.getItem(`plan_reward_${selectedPlan.id}`) === 'true';
 
     if (wasCompleted) newSet.delete(day);
     else newSet.add(day);
 
     setCompletedDays(newSet);
-    localStorage.setItem(`studyplan_${selectedPlan.id}`, JSON.stringify([...newSet]));
+    await syncProgress();
 
-    if (selectedPlan.course_id) await syncCourseProgress(selectedPlan.course_id);
-
-    if (willCompletePlan && !rewardGiven) {
+    if (willComplete && !rewardGiven) {
       confetti({
         particleCount: 600,
         spread: 130,
@@ -160,7 +151,7 @@ export default function StudyPlansPage() {
         scalar: 1.4,
       });
       await awardPoints(150);
-      localStorage.setItem(`plan_completed_reward_${selectedPlan.id}`, 'true');
+      localStorage.setItem(`plan_reward_${selectedPlan.id}`, 'true');
     }
   };
 
@@ -172,30 +163,29 @@ export default function StudyPlansPage() {
       .from('gamification')
       .select('points')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
+
+    const newPoints = (existing?.points || 0) + points;
 
     if (existing) {
-      await supabase.from('gamification').update({ points: existing.points + points }).eq('user_id', user.id);
+      await supabase.from('gamification').update({ points: newPoints }).eq('user_id', user.id);
     } else {
-      await supabase.from('gamification').insert({ user_id: user.id, points });
+      await supabase.from('gamification').insert({ user_id: user.id, points: newPoints });
     }
   };
 
   const deletePlan = async (id: string) => {
-    const plan = plans.find(p => p.id === id);
     await supabase.from('ai_study_plans').delete().eq('id', id);
     setPlans(prev => prev.filter(p => p.id !== id));
     if (selectedPlan?.id === id) {
       setSelectedPlan(plans[0] || null);
       setCompletedDays(new Set());
     }
-    if (plan?.course_id) await syncCourseProgress(plan.course_id);
   };
 
   const progress = selectedPlan
     ? Math.round((completedDays.size / selectedPlan.content.schedule.length) * 100)
     : 0;
-
   return (
     <div className="fixed inset-0 flex bg-[#0d0d0f] text-white overflow-hidden">
       {/* SIDEBAR — NOW 100% SCROLLABLE + MATCHES YOUR DESIGN */}
@@ -238,10 +228,10 @@ export default function StudyPlansPage() {
               {plans.map(plan => (
                 <div
                   key={plan.id}
-                  onClick={() => {
+                  onClick={async () => {
                     setSelectedPlan(plan);
-                    loadProgress(plan.id);
-                    if (plan.course_id) syncCourseProgress(plan.course_id);
+                  await loadProgress(plan);           // Pass full plan
+                  if (plan.course_id) await syncProgress();
                   }}
                   className={`group relative overflow-hidden rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xl cursor-pointer transition-all duration-300 hover:bg-white/8 hover:border-pink-500/30 hover:shadow-xl hover:shadow-purple-600/20 ${
                     selectedPlan?.id === plan.id

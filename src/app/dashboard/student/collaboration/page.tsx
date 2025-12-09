@@ -57,8 +57,7 @@ const DeleteConfirmModal: React.FC<{
 };
 
 export default function CollaborationPage() {
-  // === State - Fixed never error ===
-const [boards, setBoards] = useState<Board[]>([] as Board[]);
+  const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoard, setSelectedBoard] = useState<Board | null>(null);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
@@ -75,13 +74,16 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [members, setMembers] = useState<UserProfile[]>([]);
-
+  
+    // New Board Modal State
+  const [createBoardModalOpen, setCreateBoardModalOpen] = useState(false);
+  const [newBoardTitle, setNewBoardTitle] = useState('');
   // Feedback
   const [alert, setAlert] = useState<{ open: boolean; type: 'success' | 'error'; title: string; message: string }>({
     open: false, type: 'success', title: '', message: ''
   });
 
-  // Unified Delete Modal State
+  // Delete Modal
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -110,64 +112,120 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
     return () => listener?.subscription.unsubscribe();
   }, []);
 
-  // === Load Boards & Invites ===
+  // === FIXED: loadBoards with correct filter ===
   const loadBoards = useCallback(async () => {
     if (!currentUser) return;
 
+    console.log("loadBoards() called for user:", currentUser.id);
+
     const { data, error } = await supabase
-      .from('shared_boards')
-      .select('*')
+      .from("shared_boards")
+      .select("*")
       .or(`owner_id.eq.${currentUser.id},collaborator_ids.cs.{${currentUser.id}}`);
 
+    console.log("Fetched boards:", data);
+    console.log("Error:", error);
+
     if (error) {
-      setAlert({ open: true, type: 'error', title: 'Error', message: 'Failed to load boards' });
+      setAlert({ open: true, type: "error", title: "Error", message: "Failed to load boards" });
       return;
     }
 
-    const typedBoards: Board[] = (data ?? []).map((row): Board => ({
+    const typedBoards: Board[] = (data ?? []).map((row) => ({
       id: row.id,
-      title: row.title ?? 'Untitled Board',
-      background_color: row.background_color ?? '#7c3aed',
+      title: row.title ?? "Untitled Board",
+      background_color: row.background_color ?? "#7c3aed",
       owner_id: row.owner_id,
       collaborator_ids: row.collaborator_ids ?? [],
-      columns: Array.isArray(row.columns) ? row.columns : [
-        { id: 'col1', title: 'To Do', cardIds: [] },
-        { id: 'col2', title: 'In Progress', cardIds: [] },
-        { id: 'col3', title: 'Done', cardIds: [] },
-      ],
-      cards: typeof row.cards === 'object' && row.cards !== null ? row.cards : {},
+      columns: Array.isArray(row.columns)
+        ? row.columns
+        : [
+            { id: "col1", title: "To Do", cardIds: [] },
+            { id: "col2", title: "In Progress", cardIds: [] },
+            { id: "col3", title: "Done", cardIds: [] }
+          ],
+      cards: typeof row.cards === "object" && row.cards !== null ? row.cards : {}
     }));
 
     setBoards(typedBoards);
 
+    // Load pending invites
     const { data: invites } = await supabase
-      .from('board_invites')
+      .from("board_invites")
       .select(`id, board_id, board:shared_boards!board_id(id, title), inviter:users!invited_by(id, display_name, email, avatar_url)`)
-      .eq('invited_user_id', currentUser.id)
-      .eq('status', 'pending');
+      .eq("invited_user_id", currentUser.id)
+      .eq("status", "pending");
 
-    setPendingInvites((invites || []).map(i => {
+    setPendingInvites((invites || []).map((i) => {
       const board = Array.isArray(i.board) ? i.board[0] : i.board;
       const inviter = Array.isArray(i.inviter) ? i.inviter[0] : i.inviter;
       return {
         id: i.id,
         board_id: i.board_id,
-        board_title: board?.title || 'Unknown Board',
-        invited_by_name: inviter?.display_name || inviter?.email?.split('@')[0] || 'Someone',
-        invited_by_avatar: inviter?.avatar_url || null,
+        board_title: board?.title || "Unknown Board",
+        invited_by_name: inviter?.display_name || inviter?.email?.split("@")[0] || "Someone",
+        invited_by_avatar: inviter?.avatar_url || null
       };
     }));
   }, [currentUser]);
 
+  // === FIXED: useEffect with correct dependencies ===
   useEffect(() => {
-    loadBoards();
-    const channel = supabase.channel('boards')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shared_boards' }, loadBoards)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'board_invites' }, loadBoards)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [loadBoards]);
+    if (!currentUser) return;
 
+    loadBoards();
+
+    const channel = supabase
+      .channel(`boards_${currentUser.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "shared_boards" }, () => loadBoards())
+      .on("postgres_changes", { event: "*", schema: "public", table: "board_invites" }, () => loadBoards())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, loadBoards]);
+
+   // === Create Board Function ===
+  const createBoard = async () => {
+    if (!currentUser || !newBoardTitle.trim()) return;
+
+    const title = newBoardTitle.trim();
+
+    try {
+      await supabase.from('shared_boards').insert({
+        title,
+        owner_id: currentUser.id,
+        background_color: '#7c3aed',
+        columns: [
+          { id: "col1", title: "To Do", cardIds: [] },
+          { id: "col2", title: "In Progress", cardIds: [] },
+          { id: "col3", title: "Done", cardIds: [] }
+        ],
+        cards: {},
+        collaborator_ids: []
+      });
+
+      setCreateBoardModalOpen(false);
+      setNewBoardTitle('');
+      loadBoards();
+
+      setAlert({
+        open: true,
+        type: "success",
+        title: "Success!",
+        message: `Board "${title}" created!`
+      });
+    } catch (err) {
+      console.error(err);
+      setAlert({
+        open: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to create board"
+      });
+    }
+  };
   // === Board Operations ===
   const saveBoard = async (updates: Partial<Board>) => {
     if (!selectedBoard) return;
@@ -184,7 +242,7 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
         await supabase.from('shared_boards').delete().eq('id', board.id);
         setBoards(prev => prev.filter(b => b.id !== board.id));
         if (selectedBoard?.id === board.id) setSelectedBoard(null);
-        setAlert({ open: true, type: 'success', title: 'Success!', message: 'Board deleted successfully' });
+        setAlert({ open: true, type: 'success', title: 'Deleted!', message: 'Board deleted successfully' });
       }
     );
   };
@@ -201,7 +259,6 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
     setColumnModalOpen(false);
   };
 
-  // Fixed: Added missing renameColumn
   const renameColumn = (colId: string, newTitle: string) => {
     if (!selectedBoard) return;
     const updated = {
@@ -323,7 +380,7 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
     saveBoard({ columns: updated.columns, cards: updated.cards });
   };
 
-  // === Invite & Members ===
+  // === Invite & Accept ===
   const searchUsersByEmail = async (email: string) => {
     if (!email.includes('@')) {
       setSearchResults([]);
@@ -337,63 +394,111 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
 
   const inviteUser = async (userId: string) => {
     if (!selectedBoard || !currentUser) return;
+
     try {
-      const { error } = await supabase.from('board_invites').insert({
-        board_id: selectedBoard.id,
-        invited_user_id: userId,
-        invited_by: currentUser.id,
-        status: 'pending'
-      });
-      if (error) throw error;
+      const { error: inviteError } = await supabase
+        .from("board_invites")
+        .insert({
+          board_id: selectedBoard.id,
+          invited_user_id: userId,
+          invited_by: currentUser.id,
+          status: "pending"
+        });
 
-      await fetch('/api/notifications/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toUserId: userId,
-          title: 'Board Invitation',
-          body: `${currentUser.email} invited you to "${selectedBoard.title}"`,
-          data: { type: 'board_invite', board_id: selectedBoard.id }
-        })
-      });
+      if (inviteError) throw inviteError;
 
-      setAlert({ open: true, type: 'success', title: 'Success!', message: 'Invite sent!' });
-      setInviteEmail('');
+      const { error: notifError } = await supabase
+        .from("notifications")
+        .insert({
+          user_id: userId,
+          message: `${currentUser.email} invited you to collaborate on "${selectedBoard.title}".`,
+          read: false
+        });
+
+      if (notifError) throw notifError;
+
+      setAlert({ open: true, type: "success", title: "Success!", message: "Invite sent!" });
+      setInviteEmail("");
       setSearchResults([]);
     } catch (err) {
       console.error(err);
-      setAlert({ open: true, type: 'error', title: 'Error', message: 'Failed to send invite' });
+      setAlert({ open: true, type: "error", title: "Error", message: "Failed to send invite" });
     }
   };
 
   const acceptInvite = async (inviteId: string, boardId: string) => {
-    if (!currentUser) return;
-    try {
-      await supabase.from('board_invites').update({ status: 'accepted' }).eq('id', inviteId);
-      const { data } = await supabase.from('shared_boards').select('collaborator_ids').eq('id', boardId).single();
-      const updated = [...(data?.collaborator_ids || []), currentUser.id];
-      await supabase.from('shared_boards').update({ collaborator_ids: updated }).eq('id', boardId);
-      await loadBoards();
-      setAlert({ open: true, type: 'success', title: 'Success!', message: 'You joined the board!' });
-    } catch (err) {
-      console.error(err);
-      setAlert({ open: true, type: 'error', title: 'Error', message: 'Failed to accept invite' });
+  if (!currentUser) return;
+
+  try {
+    // 1. Mark invite as accepted
+    const { error: inviteError } = await supabase
+      .from("board_invites")
+      .update({ status: "accepted" })
+      .eq("id", inviteId);
+
+    if (inviteError) throw inviteError;
+
+    // 2. Add user to collaborator_ids using PostgreSQL array_append via RPC
+    // Create this function in Supabase SQL Editor first!
+    const { error: rpcError } = await supabase.rpc("add_collaborator_to_board", {
+      board_id: boardId,
+      user_id: currentUser.id,
+    });
+
+    if (rpcError) {
+      console.error("RPC Error:", rpcError);
+      throw rpcError;
     }
-  };
 
-  // Load members
+    // 3. Notify the owner (optional - safe with maybeSingle)
+    const { data: boardInfo } = await supabase
+      .from("shared_boards")
+      .select("owner_id, title")
+      .eq("id", boardId)
+      .maybeSingle(); // This returns null if not accessible (safe!)
+
+    if (boardInfo && boardInfo.owner_id !== currentUser.id) {
+      await supabase.from("notifications").insert({
+        user_id: boardInfo.owner_id,
+        message: `${currentUser.email} accepted your invite to "${boardInfo.title}".`,
+        read: false,
+      });
+    }
+
+    // 4. Refresh boards - new board will appear!
+    loadBoards();
+
+    setAlert({
+      open: true,
+      type: "success",
+      title: "Success!",
+      message: "You joined the board!",
+    });
+  } catch (err) {
+    console.error("Accept invite failed:", err);
+    setAlert({
+      open: true,
+      type: "error",
+      title: "Error",
+      message:(err as Error).message || "Failed to accept invite",
+    });
+  }
+};
+
+  // === Members Fetch ===
   useEffect(() => {
-    if (!inviteModalOpen || !selectedBoard || !currentUser) return;
-    const fetchMembers = async () => {
-      const memberIds = [selectedBoard.owner_id, ...selectedBoard.collaborator_ids].filter(id => id !== currentUser.id);
-      const { data } = await supabase.from('users').select('id, email, display_name, avatar_url').in('id', memberIds);
-      const { data: self } = await supabase.from('users').select('id, email, display_name, avatar_url').eq('id', currentUser.id).single();
-      setMembers([...(data || []), ...(self ? [self] : [])]);
-    };
-    fetchMembers();
-  }, [inviteModalOpen, selectedBoard, currentUser]);
+    if (!inviteModalOpen || !selectedBoard) return;
 
-  // === File Upload & Attachments ===
+    const fetchMembers = async () => {
+      const ids = Array.from(new Set([selectedBoard.owner_id, ...(selectedBoard.collaborator_ids || [])]));
+      const { data } = await supabase.from('users').select('id, email, display_name, avatar_url').in('id', ids);
+      if (data) setMembers(data);
+    };
+
+    fetchMembers();
+  }, [inviteModalOpen, selectedBoard]);
+
+  // === File Upload ===
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editingCard || !selectedBoard || !currentUser) return;
@@ -420,13 +525,8 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
 
     const updatedCard = { ...editingCard, attachments: [...(editingCard.attachments || []), newAtt] };
     setEditingCard(updatedCard);
-
-    const updatedBoard = {
-      ...selectedBoard,
-      cards: { ...selectedBoard.cards, [editingCard.id]: updatedCard },
-    };
-    setSelectedBoard(updatedBoard);
-    await saveBoard({ cards: updatedBoard.cards });
+    setSelectedBoard(prev => prev ? { ...prev, cards: { ...prev.cards, [editingCard.id]: updatedCard } } : prev);
+    await saveBoard({ cards: selectedBoard.cards });
   };
 
   const deleteAttachment = (cardId: string, index: number) => {
@@ -440,10 +540,9 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
 
     setSelectedBoard(updatedBoard);
     saveBoard({ cards: updatedBoard.cards });
-    setEditingCard(prev => prev?.id === cardId ? { ...prev, attachments: newAttachments } : prev);
+    setEditingCard(prev => prev?.id === cardId ? updatedCard : prev);
   };
 
-  // === Attachment Item Component ===
   const AttachmentItem = ({ attachment, cardId, index }: { attachment: Attachment; cardId?: string; index?: number }) => {
     const isImage = /\.(jpe?g|png|gif|webp)$/i.test(attachment.name);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -475,7 +574,7 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
             a.href = attachment.url;
             a.download = attachment.name;
             a.click();
-          }} title="Download">
+          }}>
             <ArrowDownTrayIcon className="w-5 h-5" />
           </button>
           {cardId !== undefined && index !== undefined && (
@@ -487,11 +586,9 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
                 <div className="absolute right-0 mt-2 w-40 bg-[#111116] border border-white/10 rounded-lg shadow-lg z-50">
                   <button
                     onClick={() => {
-                      openDeleteModal(
-                        `Delete "${attachment.name}"?`,
-                        'This file will be removed from the card.',
-                        () => { deleteAttachment(cardId, index); setMenuOpen(false); }
-                      );
+                      openDeleteModal(`Delete "${attachment.name}"?`, 'This file will be removed.', () => {
+                        deleteAttachment(cardId, index); setMenuOpen(false);
+                      });
                     }}
                     className="w-full text-left px-4 py-3 hover:bg-red-600/20 text-red-400"
                   >
@@ -556,20 +653,15 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
           </div>
         )}
 
-        {/* Boards Grid */}
+          {/* Boards Grid */}
         <div className="flex-1 overflow-y-auto p-10">
           <div className="max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-12">
               <h2 className="text-5xl font-bold">Your Boards</h2>
               <button
-                onClick={async () => {
-                  if (!currentUser) return;
-                  const title = prompt('Board name:') || 'New Board';
-                  await supabase.from('shared_boards').insert({
-                    title, owner_id: currentUser.id, background_color: '#7c3aed',
-                    columns: [], cards: {}, collaborator_ids: []
-                  });
-                  loadBoards();
+                onClick={() => {
+                  setNewBoardTitle('');
+                  setCreateBoardModalOpen(true);
                 }}
                 className="bg-gradient-to-r from-pink-500 to-purple-600 px-8 py-5 rounded-3xl font-bold text-xl shadow-2xl hover:scale-105 transition flex items-center gap-4"
               >
@@ -580,10 +672,9 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-8">
               {boards.map(board => {
                 const isOwner = currentUser?.id === board.owner_id;
-                const isActive = selectedBoard === board.id;
 
                 return (
-                  <div key={board.id} className={`relative group transition-all ${isActive ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <div key={board.id} className="relative group transition-all">
                     <div onClick={() => setSelectedBoard(board)} className="absolute inset-0 rounded-3xl z-10 cursor-pointer" />
 
                     {isOwner && (
@@ -615,6 +706,48 @@ const [boards, setBoards] = useState<Board[]>([] as Board[]);
             </div>
           </div>
         </div>
+
+        {/* Create Board Modal */}
+        {createBoardModalOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]" onClick={() => setCreateBoardModalOpen(false)}>
+            <div className="bg-[#1a1a1e] rounded-3xl p-8 border border-white/20 max-w-md w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+              <h2 className="text-3xl font-bold mb-6 bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+                Create New Board
+              </h2>
+              
+              <input
+                type="text"
+                value={newBoardTitle}
+                onChange={(e) => setNewBoardTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newBoardTitle.trim()) {
+                    createBoard();
+                  }
+                }}
+                placeholder="Enter board name..."
+                className="w-full px-6 py-4 bg-white/10 rounded-2xl outline-none focus:ring-4 focus:ring-purple-500/50 text-white placeholder-gray-500 text-xl"
+                autoFocus
+              />
+
+              <div className="flex gap-4 mt-8 justify-end">
+                <button
+                  onClick={() => setCreateBoardModalOpen(false)}
+                  className="px-8 py-3 bg-white/10 hover:bg-white/20 rounded-2xl font-medium transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={createBoard}
+                  disabled={!newBoardTitle.trim()}
+                  className="px-8 py-3 bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl font-bold transition hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
+                >
+                  <PlusIcon className="w-6 h-6" />
+                  Create Board
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modals */}
         <DeleteConfirmModal

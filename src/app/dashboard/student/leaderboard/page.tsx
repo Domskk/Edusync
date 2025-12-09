@@ -1,4 +1,3 @@
-// src/app/dashboard/student/leaderboard/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -7,8 +6,9 @@ import { supabase } from '@/lib/supabase/client';
 import { RankBorder } from '@/components/gamification/RankBorder';
 import { Flame, Trophy, Crown, Search, ArrowLeft, Zap } from 'lucide-react';
 import Image from 'next/image';
-import { motion } from 'framer-motion';
+import { motion } from 'framer-motion'; // This is correct
 
+// === Types ===
 type RankType = 'Mythic' | 'Legend' | 'Master' | 'Elite' | 'Warrior' | 'Rookie';
 
 type LeaderboardRow = {
@@ -67,7 +67,6 @@ export default function LeaderboardPage() {
       const points = row.points ?? 0;
       const level = Math.floor(points / 100) + 1;
       const meta = row.raw_user_meta_data;
-
       return {
         id: row.user_id,
         name: meta?.display_name || meta?.full_name || row.email?.split('@')[0] || 'Student',
@@ -238,7 +237,7 @@ export default function LeaderboardPage() {
             </div>
           )}
 
-          {/* List */}
+          {/* Leaderboard List */}
           <div className="space-y-4">
             {paginated.map((player, i) => {
               const globalRank = (page - 1) * pageSize + i + 1;
@@ -246,7 +245,7 @@ export default function LeaderboardPage() {
 
               return (
                 <motion.div
-                  key={player.id}
+                  key={`${player.id}-${i}`}
                   initial={{ opacity: 0, x: -50 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.05 }}
@@ -262,7 +261,8 @@ export default function LeaderboardPage() {
                     <Image
                       src={player.avatar_url ?? "/default-avatar.png"}
                       alt={player.name}
-                      width={80} height={80}
+                      width={80}
+                      height={80}
                       className="rounded-full ring-4 ring-white/20"
                       unoptimized
                     />
@@ -291,15 +291,21 @@ export default function LeaderboardPage() {
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex justify-center items-center gap-6 pt-12">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="px-10 py-4 rounded-2xl bg-white/10 disabled:opacity-50 hover:bg-white/20 transition text-lg font-bold">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-10 py-4 rounded-2xl bg-white/10 disabled:opacity-50 hover:bg-white/20 transition text-lg font-bold"
+              >
                 Previous
               </button>
               <span className="px-8 py-4 bg-purple-900/50 rounded-2xl border border-purple-500/50 font-bold">
                 Page {page} / {totalPages}
               </span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="px-10 py-4 rounded-2xl bg-white/10 disabled:opacity-50 hover:bg-white/20 transition text-lg font-bold">
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-10 py-4 rounded-2xl bg-white/10 disabled:opacity-50 hover:bg-white/20 transition text-lg font-bold"
+              >
                 Next
               </button>
             </div>
@@ -331,4 +337,4 @@ export default function LeaderboardPage() {
       </div>
     </div>
   );
-}
+};

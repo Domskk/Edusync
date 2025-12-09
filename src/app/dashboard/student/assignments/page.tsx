@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
-import { requestFCMToken, onForegroundMessage } from "@/lib/firebase/client";
 import {
   PlusIcon,
   ArrowLeftIcon,
@@ -30,7 +29,10 @@ export default function AssignmentsPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Assignment | null>(null);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    Notification?.permission === "granted"
+  );
 
   const [form, setForm] = useState({
     id: "",
@@ -44,9 +46,12 @@ export default function AssignmentsPage() {
   // LOAD ASSIGNMENTS
   // --------------------------
   async function loadAssignments() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) {
-      router.push('/login');
+      router.push("/login");
       return;
     }
 
@@ -56,74 +61,47 @@ export default function AssignmentsPage() {
       .eq("user_id", user.id)
       .order("due_date", { ascending: true });
 
-    if (error) {
-      console.error("Error loading assignments:", error);
-    } else {
-      setAssignments(data || []);
-      checkUpcomingDeadlines(data || []);
-    }
+    if (error) console.error("Error loading assignments:", error);
+
+    setAssignments(data || []);
+    checkUpcomingDeadlines(data || []);
   }
 
   // --------------------------
-  // CHECK UPCOMING DEADLINES
+  // LOCAL NOTIFICATION REMINDER
   // --------------------------
-  const checkUpcomingDeadlines = useCallback((assignmentList: Assignment[]) => {
-    assignmentList.forEach((assignment) => {
-      if (assignment.is_completed) return;
+  const checkUpcomingDeadlines = useCallback((list: Assignment[]) => {
+    if (Notification.permission !== "granted") return;
 
-      const daysUntilDue = differenceInDays(new Date(assignment.due_date), new Date());
-      
-      // Notify if due in 1 day or today
-      if (daysUntilDue <= 1 && daysUntilDue >= 0) {
-        const message = daysUntilDue === 0 
-          ? `📅 Due TODAY: ${assignment.title}` 
-          : `⚠️ Due TOMORROW: ${assignment.title}`;
-        
-        if (Notification.permission === "granted") {
-          new Notification("Assignment Reminder", {
-            body: message,
-            icon: "/icon.svg",
-            tag: assignment.id,
-          });
-        }
+    list.forEach((a) => {
+      if (a.is_completed) return;
+
+      const days = differenceInDays(new Date(a.due_date), new Date());
+
+      if (days === 0) {
+        new Notification("Assignment Due TODAY", {
+          body: `📅 ${a.title} is due today.`,
+          icon: "/icon.svg",
+        });
+      } else if (days === 1) {
+        new Notification("Assignment Due Tomorrow", {
+          body: `⚠️ ${a.title} is due tomorrow.`,
+          icon: "/icon.svg",
+        });
       }
     });
   }, []);
 
   // --------------------------
-  // SETUP FIREBASE NOTIFICATIONS
-  // --------------------------
-  useEffect(() => {
-    const setupNotifications = async () => {
-      if (Notification.permission === "granted") {
-        setNotificationsEnabled(true);
-        await requestFCMToken();
-      }
-
-      onForegroundMessage((payload) => {
-        console.log("Foreground message:", payload);
-        if (payload.notification) {
-          alert(`${payload.notification.title}: ${payload.notification.body}`);
-        }
-      });
-    };
-
-    setupNotifications();
-  }, []);
-
-  // --------------------------
-  // ENABLE NOTIFICATIONS
+  // ENABLE BROWSER NOTIFICATIONS ONLY
   // --------------------------
   const enableNotifications = async () => {
-    if (Notification.permission === "default") {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        setNotificationsEnabled(true);
-        await requestFCMToken();
-        alert("✅ Notifications enabled! You'll get reminders for upcoming assignments.");
-      }
-    } else if (Notification.permission === "denied") {
-      alert("❌ Notifications blocked. Please enable them in your browser settings.");
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      setNotificationsEnabled(true);
+      alert("✅ Reminders enabled! You will get daily assignment alerts.");
+    } else {
+      alert("❌ Notifications blocked. Enable them in browser settings.");
     }
   };
 
@@ -139,11 +117,12 @@ export default function AssignmentsPage() {
   // SAVE (CREATE/UPDATE)
   // --------------------------
   async function saveAssignment() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
 
     if (editing) {
-      // Update
       await supabase
         .from("assignments")
         .update({
@@ -155,17 +134,14 @@ export default function AssignmentsPage() {
         .eq("id", editing.id)
         .eq("user_id", user.id);
     } else {
-      // Create
-      await supabase
-        .from("assignments")
-        .insert({
-          user_id: user.id,
-          title: form.title,
-          subject: form.subject || null,
-          due_date: form.due_date,
-          description: form.description || null,
-          is_completed: false,
-        });
+      await supabase.from("assignments").insert({
+        user_id: user.id,
+        title: form.title,
+        subject: form.subject || null,
+        due_date: form.due_date,
+        description: form.description || null,
+        is_completed: false,
+      });
     }
 
     setShowModal(false);
@@ -184,14 +160,16 @@ export default function AssignmentsPage() {
   // --------------------------
   // TOGGLE COMPLETE
   // --------------------------
-  async function toggleComplete(assignment: Assignment) {
-    const { data: { user } } = await supabase.auth.getUser();
+  async function toggleComplete(a: Assignment) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
 
     await supabase
       .from("assignments")
-      .update({ is_completed: !assignment.is_completed })
-      .eq("id", assignment.id)
+      .update({ is_completed: !a.is_completed })
+      .eq("id", a.id)
       .eq("user_id", user.id);
 
     loadAssignments();
@@ -203,45 +181,67 @@ export default function AssignmentsPage() {
   async function deleteAssignment(id: string) {
     if (!confirm("Delete this assignment?")) return;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
 
-    await supabase
-      .from("assignments")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
+    await supabase.from("assignments").delete().eq("id", id).eq("user_id", user.id);
 
     loadAssignments();
   }
 
   // --------------------------
-  // GET URGENCY BADGE
+  // URGENCY BADGES
   // --------------------------
-  const getUrgencyBadge = (dueDate: string, isCompleted: boolean) => {
-    if (isCompleted) return null;
-    
-    const date = new Date(dueDate);
-    const daysUntil = differenceInDays(date, new Date());
+  const getUrgencyBadge = (due: string, completed: boolean) => {
+    if (completed) return null;
 
-    if (isPast(date) && !isToday(date)) {
-      return <span className="px-4 py-2 bg-red-500/20 text-red-400 rounded-full text-sm font-bold">OVERDUE</span>;
-    }
-    if (isToday(date)) {
-      return <span className="px-4 py-2 bg-orange-500/20 text-orange-400 rounded-full text-sm font-bold">DUE TODAY</span>;
-    }
-    if (isTomorrow(date)) {
-      return <span className="px-4 py-2 bg-yellow-500/20 text-yellow-400 rounded-full text-sm font-bold">DUE TOMORROW</span>;
-    }
-    if (daysUntil <= 7) {
-      return <span className="px-4 py-2 bg-blue-500/20 text-blue-400 rounded-full text-sm font-bold">{daysUntil} DAYS LEFT</span>;
-    }
+    const date = new Date(due);
+    const days = differenceInDays(date, new Date());
+
+    if (isPast(date) && !isToday(date))
+      return (
+        <span className="px-4 py-2 bg-red-500/20 text-red-400 rounded-full text-sm font-bold">
+          OVERDUE
+        </span>
+      );
+
+    if (isToday(date))
+      return (
+        <span className="px-4 py-2 bg-orange-500/20 text-orange-400 rounded-full text-sm font-bold">
+          DUE TODAY
+        </span>
+      );
+
+    if (isTomorrow(date))
+      return (
+        <span className="px-4 py-2 bg-yellow-500/20 text-yellow-400 rounded-full text-sm font-bold">
+          DUE TOMORROW
+        </span>
+      );
+
+    if (days <= 7)
+      return (
+        <span className="px-4 py-2 bg-blue-500/20 text-blue-400 rounded-full text-sm font-bold">
+          {days} DAYS LEFT
+        </span>
+      );
+
     return null;
   };
 
-  const upcomingCount = assignments.filter(a => !a.is_completed && differenceInDays(new Date(a.due_date), new Date()) <= 7).length;
-  const overdueCount = assignments.filter(a => !a.is_completed && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date))).length;
+  const upcomingCount = assignments.filter(
+    (a) => !a.is_completed && differenceInDays(new Date(a.due_date), new Date()) <= 7
+  ).length;
 
+  const overdueCount = assignments.filter(
+    (a) => !a.is_completed && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date))
+  ).length;
+
+  // -------------------------------------
+  // UI (unchanged)
+  // -------------------------------------
   return (
     <div className="fixed inset-0 bg-[#0d0d0f] text-white flex flex-col">
       {/* HEADER */}
@@ -250,14 +250,14 @@ export default function AssignmentsPage() {
           <h1 className="text-5xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
             Assignments
           </h1>
-          
-          {/* Stats */}
+
           <div className="flex gap-4 ml-8">
             {overdueCount > 0 && (
               <div className="px-5 py-3 bg-red-500/20 rounded-full border border-red-500/50">
                 <span className="text-red-400 font-bold">{overdueCount} Overdue</span>
               </div>
             )}
+
             {upcomingCount > 0 && (
               <div className="px-5 py-3 bg-yellow-500/20 rounded-full border border-yellow-500/50">
                 <span className="text-yellow-400 font-bold">{upcomingCount} Due Soon</span>
