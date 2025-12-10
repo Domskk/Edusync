@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase/client';
 import { Badge, ICON_MAP } from '@/components/gamification/Badge';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { useAuth } from '@/lib/hooks/useAuth';
 
 type Rarity = 'common' | 'rare' | 'epic' | 'legendary' | 'mythic';
 type RequirementType =
@@ -39,7 +38,6 @@ const initialForm: DBBadge = {
 };
 
 export default function ManageBadges() {
-  const { user } = useAuth();
   const [badges, setBadges] = useState<DBBadge[]>([]);
   const [form, setForm] = useState<DBBadge>(initialForm);
   const [saving, setSaving] = useState(false);

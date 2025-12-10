@@ -232,21 +232,64 @@ export default function CollaborationPage() {
     await supabase.from('shared_boards').update(updates).eq('id', selectedBoard.id);
   };
 
-  const handleDeleteBoard = (e: React.MouseEvent, board: Board) => {
-    e.stopPropagation();
-    openDeleteModal(
-      `Delete "${board.title}"?`,
-      'This board and all its data will be permanently deleted.',
-      async () => {
-        await supabase.from('board_invites').delete().eq('board_id', board.id);
-        await supabase.from('shared_boards').delete().eq('id', board.id);
-        setBoards(prev => prev.filter(b => b.id !== board.id));
-        if (selectedBoard?.id === board.id) setSelectedBoard(null);
-        setAlert({ open: true, type: 'success', title: 'Deleted!', message: 'Board deleted successfully' });
-      }
-    );
-  };
+ const handleDeleteBoard = (e: React.MouseEvent, board: Board) => {
+  e.stopPropagation();
 
+  openDeleteModal(
+    `Delete "${board.title}"?`,
+    'This board and all its cards, attachments, and invites will be permanently deleted. This action cannot be undone.',
+    async () => {
+      try {
+        // 1. Delete all invites
+        const { error: inviteError } = await supabase
+          .from('board_invites')
+          .delete()
+          .eq('board_id', board.id);
+
+        if (inviteError) throw inviteError;
+
+        // 2. Delete the board (RLS will check owner_id)
+        const { error: boardError } = await supabase
+          .from('shared_boards')
+          .delete()
+          .eq('id', board.id);
+
+        if (boardError) {
+          console.error("Delete failed:", boardError);
+          setAlert({
+            open: true,
+            type: 'error',
+            title: 'Access Denied',
+            message: 'Only the board owner can delete it.'
+          });
+          return;
+        }
+
+        // 3. Optimistically remove from UI
+        setBoards(prev => prev.filter(b => b.id !== board.id));
+        if (selectedBoard?.id === board.id) {
+          setSelectedBoard(null);
+        }
+
+        setAlert({
+          open: true,
+          type: 'success',
+          title: 'Deleted!',
+          message: `"${board.title}" has been permanently deleted`
+        });
+
+      } catch (err) {
+        console.error(err);
+        setAlert({
+          open: true,
+          type: 'error',
+          title: 'Error',
+          message: 'Failed to delete board'
+        });
+      }
+    }
+  );
+};
   // === Column Operations ===
   const addColumn = () => {
     if (!selectedBoard) return;
