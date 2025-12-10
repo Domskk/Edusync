@@ -134,51 +134,51 @@
       <div className="fixed inset-0 bg-[#0d0d0f] text-white flex flex-col">
 
         {/* HEADER */}
-        <div className="flex items-center justify-between p-6 border-b border-white/10 backdrop-blur-xl bg-black/50">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+        <div className="flex items-center justify-between p-4 md:p-6 border-b border-white/10 backdrop-blur-xl bg-black/50">
+          <h1 className="text-3xl md:text-5xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
             My Courses
           </h1>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 md:gap-6">
             <button
               onClick={() => router.push('/dashboard/student')}
-              className="p-3 hover:bg-white/10 rounded-xl transition"
+              className="p-2 md:p-3 hover:bg-white/10 rounded-lg md:rounded-xl transition"
             >
-              <ArrowLeftIcon className="w-7 h-7" />
+              <ArrowLeftIcon className="w-5 h-5 md:w-7 md:h-7" />
             </button>
 
             <button
               onClick={() => setShowModal(true)}
-              className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full font-bold text-lg hover:scale-105 transition shadow-2xl shadow-purple-500/50"
+              className="flex items-center gap-2 md:gap-3 px-6 py-3 md:px-8 md:py-4 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full font-bold text-base md:text-lg hover:scale-105 transition shadow-2xl shadow-purple-500/50"
             >
-              <PlusIcon className="w-7 h-7" />
+              <PlusIcon className="w-5 h-5 md:w-7 md:h-7" />
               New Course
             </button>
           </div>
         </div>
 
         {/* MAIN CONTENT */}
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-7xl mx-auto space-y-16">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+          <div className="max-w-7xl mx-auto space-y-8 md:space-y-16">
 
             {/* This Week Calendar */}
-            <div className="bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 p-10">
-              <h2 className="text-4xl font-bold mb-10 flex items-center gap-4">
-                <CalendarIcon className="w-12 h-12 text-pink-400" />
+            <div className="bg-white/5 backdrop-blur-xl rounded-2xl md:rounded-3xl border border-white/10 p-6 md:p-10">
+              <h2 className="text-2xl md:text-4xl font-bold mb-6 md:mb-10 flex items-center gap-3 md:gap-4">
+                <CalendarIcon className="w-8 h-8 md:w-12 md:h-12 text-pink-400" />
                 This Week
               </h2>
-              <div className="grid grid-cols-7 gap-6">
+              <div className="grid grid-cols-7 gap-3 md:gap-6">
                 {weekDays.map(day => (
                   <div
                     key={day.toString()}
-                    className={`p-8 rounded-3xl text-center transition-all ${
+                    className={`p-4 md:p-8 rounded-2xl md:rounded-3xl text-center transition-all ${
                       isToday(day)
                         ? 'bg-gradient-to-br from-pink-500 to-purple-600 text-white shadow-2xl shadow-pink-500/50'
                         : 'bg-white/5 text-gray-300'
                     }`}
                   >
-                    <p className="text-lg opacity-80">{format(day, 'EEE')}</p>
-                    <p className="text-5xl font-bold mt-4">{format(day, 'd')}</p>
+                    <p className="text-sm md:text-lg opacity-80">{format(day, 'EEE')}</p>
+                    <p className="text-3xl md:text-5xl font-bold mt-2 md:mt-4">{format(day, 'd')}</p>
                   </div>
                 ))}
               </div>
@@ -203,36 +203,32 @@
                     return (
                       <Reorder.Item key={course.id} value={course}>
                         <div className="group bg-white/5 backdrop-blur-2xl rounded-3xl overflow-hidden border border-white/10 hover:border-pink-500/50 transition-all">
-                          {/* Drag Handle */}
-                          <div className="flex items-center justify-end p-4 opacity-0 group-hover:opacity-100 transition">
-                            <Bars3Icon className="w-8 h-8 text-white/50 cursor-grab active:cursor-grabbing" />
-                          </div>
-
                           {/* Course Card */}
-                          <div className="flex">
+                          <div className="flex flex-col">
                             {/* Color Bar */}
-                            <div className={`w-48 bg-gradient-to-b ${gradient} flex items-center justify-center`}>
-                              <h3 className="text-4xl font-bold text-white transform -rotate-90 whitespace-nowrap">
+                            <div className={`h-12 md:h-16 bg-gradient-to-r ${gradient} flex items-center justify-between px-4 md:px-6`}>
+                              <h3 className="text-lg md:text-2xl font-bold text-white whitespace-nowrap">
                                 {course.title}
                               </h3>
+                              <Bars3Icon className="w-6 h-6 md:w-8 md:h-8 text-white/50 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition" />
                             </div>
 
                             {/* Content */}
-                            <div className="flex-1 p-10 flex items-center justify-between">
-                              <div className="flex-1">
+                            <div className="flex-1 p-6 md:p-10 flex flex-col md:flex-row md:items-center md:justify-between">
+                              <div className="flex-1 mb-6 md:mb-0">
                                 {/* Progress Circle */}
                                 <div className="relative inline-block">
-                                  <svg className="w-40 h-40 -rotate-90">
-                                    <circle cx="80" cy="80" r="72" stroke="rgba(255,255,255,0.1)" strokeWidth="14" fill="none" />
+                                  <svg className="w-32 h-32 md:w-40 md:h-40 -rotate-90">
+                                    <circle cx="64" cy="64" r="58" stroke="rgba(255,255,255,0.1)" strokeWidth="12" fill="none" />
                                     <circle
-                                      cx="80"
-                                      cy="80"
-                                      r="72"
+                                      cx="64"
+                                      cy="64"
+                                      r="58"
                                       stroke="url(#grad)"
-                                      strokeWidth="14"
+                                      strokeWidth="12"
                                       fill="none"
-                                      strokeDasharray={452}
-                                      strokeDashoffset={452 * (1 - prog / 100)}
+                                      strokeDasharray={362}
+                                      strokeDashoffset={362 * (1 - prog / 100)}
                                       className="transition-all duration-1000"
                                     />
                                     <defs>
@@ -243,41 +239,43 @@
                                     </defs>
                                   </svg>
                                   <div className="absolute inset-0 flex items-center justify-center">
-                                    <span className="text-5xl font-bold">{Math.round(prog)}%</span>
+                                    <span className="text-3xl md:text-5xl font-bold">{Math.round(prog)}%</span>
                                   </div>
                                 </div>
                               </div>
 
                               {/* Actions */}
-                              <div className="flex gap-4">
+                              <div className="flex flex-col md:flex-row gap-3 md:gap-4">
                                 <button
                                   onClick={() => router.push(`/dashboard/student/generate-studyplan?course_id=${course.id}&title=${encodeURIComponent(course.title)}`)}
-                                  className="px-8 py-5 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full font-bold text-lg hover:scale-105 transition shadow-xl"
+                                  className="px-6 py-3 md:px-8 md:py-5 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full font-bold text-base md:text-lg hover:scale-105 transition shadow-xl"
                                 >
                                   Study Plan
                                 </button>
 
-                                <button
-                                  onClick={() => {
-                                    setEditingCourse(course);
-                                    setForm({
-                                      title: course.title,
-                                      description: course.description || '',
-                                      color: course.color || 'purple',
-                                    });
-                                    setShowModal(true);
-                                  }}
-                                  className="p-5 bg-white/10 rounded-2xl hover:bg-white/20 transition"
-                                >
-                                  <PencilIcon className="w-7 h-7" />
-                                </button>
+                                <div className="flex gap-3 md:gap-4">
+                                  <button
+                                    onClick={() => {
+                                      setEditingCourse(course);
+                                      setForm({
+                                        title: course.title,
+                                        description: course.description || '',
+                                        color: course.color || 'purple',
+                                      });
+                                      setShowModal(true);
+                                    }}
+                                    className="p-3 md:p-5 bg-white/10 rounded-xl md:rounded-2xl hover:bg-white/20 transition"
+                                  >
+                                    <PencilIcon className="w-5 h-5 md:w-7 md:h-7" />
+                                  </button>
 
-                                <button
-                                  onClick={() => deleteCourse(course.id)}
-                                  className="p-5 bg-red-500/20 rounded-2xl hover:bg-red-500/40 transition"
-                                >
-                                  <TrashIcon className="w-7 h-7 text-red-400" />
-                                </button>
+                                  <button
+                                    onClick={() => deleteCourse(course.id)}
+                                    className="p-3 md:p-5 bg-red-500/20 rounded-xl md:rounded-2xl hover:bg-red-500/40 transition"
+                                  >
+                                    <TrashIcon className="w-5 h-5 md:w-7 md:h-7 text-red-400" />
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -293,9 +291,9 @@
 
         {/* Modal - Same as before */}
         {showModal && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-xl z-50 flex items-center justify-center p-6">
-            <div className="bg-[#1a1a1e] border border-white/20 rounded-3xl p-10 max-w-2xl w-full shadow-2xl">
-              <h2 className="text-4xl font-bold mb-10 bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-xl z-50 flex items-center justify-center p-4 md:p-6">
+            <div className="bg-[#1a1a1e] border border-white/20 rounded-2xl md:rounded-3xl p-6 md:p-10 max-w-2xl w-full shadow-2xl">
+              <h2 className="text-2xl md:text-4xl font-bold mb-6 md:mb-10 bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
                 {editingCourse ? 'Edit Course' : 'New Course'}
               </h2>
 
@@ -304,32 +302,32 @@
                 value={form.title}
                 onChange={e => setForm({ ...form, title: e.target.value })}
                 placeholder="Course title"
-                className="w-full px-6 py-5 mb-6 bg-white/10 border border-white/20 rounded-2xl focus:border-pink-500 outline-none text-lg"
+                className="w-full px-4 md:px-6 py-4 md:py-5 mb-4 md:mb-6 bg-white/10 border border-white/20 rounded-xl md:rounded-2xl focus:border-pink-500 outline-none text-base md:text-lg"
               />
 
-              <div className="grid grid-cols-6 gap-4 mb-10">
+              <div className="grid grid-cols-6 gap-3 md:gap-4 mb-6 md:mb-10">
                 {Object.keys(colorMap).map(key => (
                   <button
                     key={key}
                     onClick={() => setForm({ ...form, color: key })}
-                    className={`h-20 rounded-2xl bg-gradient-to-br ${colorMap[key]} transition-all ${
+                    className={`h-16 md:h-20 rounded-xl md:rounded-2xl bg-gradient-to-br ${colorMap[key]} transition-all ${
                       form.color === key ? 'ring-4 ring-white/60 scale-110' : ''
                     }`}
                   />
                 ))}
               </div>
 
-              <div className="flex gap-5">
+              <div className="flex gap-3 md:gap-5">
                 <button
                   onClick={saveCourse}
                   disabled={!form.title.trim()}
-                  className="flex-1 py-5 bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl font-bold hover:scale-105 transition disabled:opacity-50"
+                  className="flex-1 py-4 md:py-5 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl md:rounded-2xl font-bold hover:scale-105 transition disabled:opacity-50"
                 >
                   {editingCourse ? 'Save' : 'Create'}
                 </button>
                 <button
                   onClick={() => setShowModal(false)}
-                  className="px-10 py-5 bg-white/10 rounded-2xl hover:bg-white/20 transition"
+                  className="px-6 md:px-10 py-4 md:py-5 bg-white/10 rounded-xl md:rounded-2xl hover:bg-white/20 transition"
                 >
                   Cancel
                 </button>

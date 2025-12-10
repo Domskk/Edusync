@@ -21,9 +21,11 @@
   export default function AIChat({
     chatId,
     onTitleUpdate,
+    sidebarOpen,
   }: {
     chatId: string | null;
     onTitleUpdate: (id: string, title: string) => void;
+    sidebarOpen: boolean;
   }) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -204,7 +206,7 @@
         </div>
 
         {/* INPUT AREA - EXACTLY LIKE YOUR DESIGN */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0a0a0b] via-[#0a0a0b]/95 to-transparent pt-12 pb-6 px-6">
+        <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0a0a0b] via-[#0a0a0b]/95 to-transparent pt-12 pb-6 px-6 transition-all duration-300 ${sidebarOpen ? 'md:ml-72' : 'md:ml-0'}`}>
           <div className="max-w-4xl mx-auto">
             <div className="flex gap-4 items-end">
               <div className="flex-1 relative">

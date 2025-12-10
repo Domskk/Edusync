@@ -663,9 +663,9 @@ export default function CollaborationPage() {
                   setNewBoardTitle('');
                   setCreateBoardModalOpen(true);
                 }}
-                className="bg-gradient-to-r from-pink-500 to-purple-600 px-8 py-5 rounded-3xl font-bold text-xl shadow-2xl hover:scale-105 transition flex items-center gap-4"
+                className="bg-gradient-to-r from-pink-500 to-purple-600 px-4 py-2 md:px-8 md:py-5 rounded-xl md:rounded-3xl font-bold text-sm md:text-xl shadow-lg md:shadow-2xl hover:scale-105 transition flex items-center gap-2 md:gap-4"
               >
-                <PlusIcon className="w-8 h-8" /> New Board
+                <PlusIcon className="w-5 h-5 md:w-8 md:h-8" /> New Board
               </button>
             </div>
 

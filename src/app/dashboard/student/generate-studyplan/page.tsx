@@ -89,7 +89,7 @@ export default function GenerateStudyPlanPage() {
         <button onClick={() => router.push('/dashboard/student')} className="p-3 hover:bg-white/10 rounded-xl transition">
           <ArrowLeftIcon className="w-7 h-7" />
         </button>
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+        <h1 className="text-lg md:text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
           Generate Study Plan
         </h1>
         <div className="w-14" />
@@ -189,9 +189,9 @@ export default function GenerateStudyPlanPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="inline-flex items-center gap-4 px-16 py-7 bg-gradient-to-r from-pink-500 to-purple-600 rounded-3xl font-bold text-2xl shadow-2xl hover:scale-105 transition disabled:opacity-70"
+                className="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl font-semibold text-lg shadow-lg hover:scale-105 transition disabled:opacity-70"
               >
-                {loading ? <>Generating...</> : <><SparklesIcon className="w-10 h-10" /> Generate Study Plan</>}
+                {loading ? <>Generating...</> : <><SparklesIcon className="w-6 h-6" /> Generate Study Plan</>}
               </button>
             </div>
           </form>

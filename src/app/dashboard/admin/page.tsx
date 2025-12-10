@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Badge, ICON_MAP } from '@/components/gamification/Badge';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
+import { useAuth } from '@/lib/hooks/useAuth';
 
 type Rarity = 'common' | 'rare' | 'epic' | 'legendary' | 'mythic';
 type RequirementType =
@@ -38,9 +39,15 @@ const initialForm: DBBadge = {
 };
 
 export default function ManageBadges() {
+  const { user } = useAuth();
   const [badges, setBadges] = useState<DBBadge[]>([]);
   const [form, setForm] = useState<DBBadge>(initialForm);
   const [saving, setSaving] = useState(false);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = '/';
+  };
 
   const loadBadges = async () => {
     const { data, error } = await supabase
@@ -128,13 +135,21 @@ export default function ManageBadges() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-950 via-black to-indigo-950 p-8">
       <div className="max-w-7xl mx-auto">
-        <motion.h1
-          initial={{ opacity: 0, y: -30 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-5xl md:text-6xl font-black text-center bg-gradient-to-r from-yellow-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent mb-12"
-        >
-          Badge Creator Studio
-        </motion.h1>
+        <div className="flex justify-between items-center mb-8">
+          <motion.h1
+            initial={{ opacity: 0, y: -30 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-2xl md:text-3xl font-black bg-gradient-to-r from-yellow-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent"
+          >
+            Badge Creator Studio
+          </motion.h1>
+          <button
+            onClick={handleLogout}
+            className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition-colors"
+          >
+            Logout
+          </button>
+        </div>
 
         {/* Form + Live Preview */}
         <div className="grid lg:grid-cols-2 gap-12 mb-16">

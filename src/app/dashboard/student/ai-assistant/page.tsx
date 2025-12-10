@@ -25,6 +25,7 @@ export default function AIAssistantPage() {
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
 
   // Load chats — wrapped in useCallback to satisfy exhaustive-deps
   const loadChats = useCallback(async () => {
@@ -41,6 +42,21 @@ export default function AIAssistantPage() {
       setSelectedChatId(chatList[0].id);
     }
   }, [selectedChatId]);
+
+  // Detect mobile
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Hide sidebar on mobile on mount
+  useEffect(() => {
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
 
   // Load on mount + when a chat is deleted/created
   useEffect(() => {
@@ -150,7 +166,7 @@ export default function AIAssistantPage() {
 
         {/* Chat Area */}
         <div className="flex-1 overflow-hidden">
-          <AIChat chatId={selectedChatId} onTitleUpdate={updateTitle} />
+          <AIChat chatId={selectedChatId} onTitleUpdate={updateTitle} sidebarOpen={sidebarOpen} />
         </div>
       </div>
     </div>

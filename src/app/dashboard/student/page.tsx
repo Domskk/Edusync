@@ -295,7 +295,7 @@ export default function StudentDashboard() {
 
             <Link href="/dashboard/student/leaderboard">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}
-                className="bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 rounded-3xl p-12 text-center shadow-2xl">
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 rounded-3xl p-12 text-center shadow-2xl flex flex-col items-center justify-center">
                 <h3 className="text-4xl font-bold mb-4 text-white">Leaderboard</h3>
                 <p className="text-xl text-white/90">See who’s dominating</p>
               </motion.div>
