@@ -29,10 +29,14 @@ export default function AssignmentsPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Assignment | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
-  const [notificationsEnabled, setNotificationsEnabled] = useState(
-    Notification?.permission === "granted"
-  );
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setNotificationsEnabled(Notification.permission === "granted");
+    }
+  }, []);
+
 
   const [form, setForm] = useState({
     id: "",
@@ -71,7 +75,9 @@ export default function AssignmentsPage() {
   // LOCAL NOTIFICATION REMINDER
   // --------------------------
   const checkUpcomingDeadlines = useCallback((list: Assignment[]) => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
+
 
     list.forEach((a) => {
       if (a.is_completed) return;
