@@ -184,7 +184,7 @@ export default function StudentDashboard() {
                   src={profile?.avatar_url || '/default-avatar.png'}
                   alt={displayName}
                   width={80} height={80}
-                  className="rounded-full object-cover ring-4 ring-purple-500/60 shadow-2xl"
+                  className="w-16 h-16 md:w-20 md:h-20 rounded-full object-cover ring-4 ring-purple-500/60 shadow-2xl"
                   priority
                   unoptimized
                 />
@@ -207,7 +207,7 @@ export default function StudentDashboard() {
           <motion.h1
             initial={{ opacity: 0, y: -40 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-6xl md:text-8xl font-black bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent text-center"
+            className="text-4xl md:text-6xl lg:text-8xl font-black bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent text-center"
           >
             Welcome back, {displayName.split(' ')[0]}!
           </motion.h1>
@@ -221,26 +221,26 @@ export default function StudentDashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-12 mb-16">
               <div className="text-center">
                 <div className="mx-auto w-36 h-36 bg-gradient-to-br from-yellow-600/40 to-orange-700/40 rounded-3xl border-4 border-yellow-500/50 flex items-center justify-center mb-6 shadow-2xl">
-                  <StarIcon className="w-20 h-20 text-yellow-400" />
+                  <StarIcon className="w-12 h-12 md:w-16 md:h-16 lg:w-20 lg:h-20 text-yellow-400" />
                 </div>
-                <p className="text-6xl font-black text-white">{points.toLocaleString()}</p>
+                <p className="text-4xl md:text-5xl lg:text-6xl font-black text-white">{points.toLocaleString()}</p>
                 <p className="text-xl text-gray-300 mt-2">Total XP</p>
               </div>
 
               <div className="text-center">
                 <div className="mx-auto w-36 h-36 bg-gradient-to-br from-orange-600/40 to-red-700/40 rounded-3xl border-4 border-orange-500/50 flex items-center justify-center mb-6 shadow-2xl">
-                  <Flame className="w-24 h-24 text-orange-400 animate-pulse" />
+                  <Flame className="w-14 h-14 md:w-18 md:h-18 lg:w-24 lg:h-24 text-orange-400 animate-pulse" />
                 </div>
-                <p className="text-6xl font-black bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">{streak}</p>
+                <p className="text-4xl md:text-5xl lg:text-6xl font-black bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">{streak}</p>
                 <p className="text-xl text-gray-300 mt-2">Day Streak</p>
                 {streak >= 7 && <p className="text-orange-400 font-bold animate-pulse mt-2">ON FIRE!</p>}
               </div>
 
               <div className="text-center">
                 <div className="mx-auto w-36 h-36 bg-gradient-to-br from-purple-600/40 to-pink-700/40 rounded-3xl border-4 border-purple-500/50 flex items-center justify-center mb-6 shadow-2xl">
-                  <TrophyIcon className="w-20 h-20 text-purple-400" />
+                  <TrophyIcon className="w-12 h-12 md:w-16 md:h-16 lg:w-20 lg:h-20 text-purple-400" />
                 </div>
-                <p className="text-6xl font-black text-purple-300">
+                <p className="text-4xl md:text-5xl lg:text-6xl font-black text-purple-300">
                   #{globalRank === null ? '—' : globalRank}
                 </p>
                 <p className="text-xl text-gray-300 mt-2">Global Rank</p>
@@ -250,7 +250,7 @@ export default function StudentDashboard() {
             {/* Badge Preview */}
             <Link href="/dashboard/student/badges" className="block">
               <motion.div whileHover={{ scale: 1.02 }} className="text-center">
-                <h2 className="text-4xl font-black mb-8 bg-gradient-to-r from-yellow-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
+                <h2 className="text-2xl md:text-3xl lg:text-4xl font-black mb-8 bg-gradient-to-r from-yellow-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
                   Your Trophy Room ({badges.length})
                 </h2>
                 <div className="flex justify-center gap-6 flex-wrap">
@@ -287,16 +287,16 @@ export default function StudentDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
             <Link href="/dashboard/student/courses">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}
-                className="bg-white/10 backdrop-blur-3xl border-2 border-white/20 rounded-3xl p-12 text-center hover:bg-white/20 transition-all shadow-2xl">
-                <h3 className="text-4xl font-bold mb-4">My Courses</h3>
+                className="bg-white/10 backdrop-blur-3xl border-2 border-white/20 rounded-3xl p-12 text-center hover:bg-white/20 transition-all shadow-2xl min-h-[44px] flex flex-col justify-center">
+                <h3 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">My Courses</h3>
                 <p className="text-xl text-gray-300">Continue your journey</p>
               </motion.div>
             </Link>
 
             <Link href="/dashboard/student/leaderboard">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}
-                className="bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 rounded-3xl p-12 text-center shadow-2xl flex flex-col items-center justify-center">
-                <h3 className="text-4xl font-bold mb-4 text-white">Leaderboard</h3>
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 rounded-3xl p-12 text-center shadow-2xl flex flex-col items-center justify-center min-h-[44px]">
+                <h3 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4 text-white">Leaderboard</h3>
                 <p className="text-xl text-white/90">See who’s dominating</p>
               </motion.div>
             </Link>
@@ -308,7 +308,7 @@ export default function StudentDashboard() {
       {showNameModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-6">
           <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            className="bg-gradient-to-br from-purple-900 to-pink-900 rounded-3xl p-12 max-w-md w-full border-4 border-purple-500 shadow-2xl">
+            className="bg-gradient-to-br from-purple-900 to-pink-900 rounded-3xl p-6 md:p-8 lg:p-12 max-w-md w-full border-4 border-purple-500 shadow-2xl">
             <h2 className="text-4xl font-black text-white mb-6 text-center">Welcome!</h2>
             <p className="text-xl text-gray-200 text-center mb-8">Choose your display name</p>
             <input
@@ -316,7 +316,7 @@ export default function StudentDashboard() {
               value={newDisplayName}
               onChange={(e) => setNewDisplayName(e.target.value)}
               placeholder="Enter your name"
-              className="w-full px-6 py-5 bg-white/10 border-2 border-white/20 rounded-2xl text-white text-xl text-center focus:outline-none focus:border-yellow-400"
+              className="w-full px-6 py-5 bg-white/10 border-2 border-white/20 rounded-2xl text-white text-xl text-center focus:outline-none focus:border-yellow-400 min-h-[44px]"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && saveDisplayName()}
             />
