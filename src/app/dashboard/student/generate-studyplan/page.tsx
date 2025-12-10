@@ -1,11 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { ArrowLeftIcon, SparklesIcon, ClockIcon, BookOpenIcon } from '@heroicons/react/24/outline';
 
 export default function GenerateStudyPlanPage() {
+  return (
+    <Suspense fallback={<div className="text-white p-8">Loading...</div>}>
+      <Content />
+    </Suspense>
+  );
+}
+
+function Content() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
