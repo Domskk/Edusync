@@ -27,7 +27,7 @@
     "firebase-sdk": "^0.0.0",
     "framer-motion": "^12.23.24",
     "lucide-react": "^0.555.0",
-    "next": "15.5.6",
+    "next": "15.5.7",
     "react": "19.1.0",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "19.1.0",
