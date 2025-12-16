@@ -29,7 +29,7 @@ export async function checkAndAwardBadges(userId: string) {
       .from('gamification')
       .select('points, current_streak, first_login_completed')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     if (!gamification) return { success: false, newBadges: [] };
 
@@ -73,10 +73,33 @@ export async function checkAndAwardBadges(userId: string) {
 
       if (!unlocked) continue;
 
-      await supabase.from('user_badges').insert({ user_id: userId, badge_id: badge.id });
+      // Use upsert with ignoreDuplicates to prevent 409 errors
+      const { error: insertError } = await supabase
+        .from('user_badges')
+        .upsert(
+          { user_id: userId, badge_id: badge.id },
+          { 
+            onConflict: 'user_id,badge_id',
+            ignoreDuplicates: true 
+          }
+        );
+
+      // If there was an error other than duplicate, log it
+      if (insertError && insertError.code !== '23505') {
+        console.error('Error awarding badge:', insertError);
+        continue; // Skip this badge and continue with others
+      }
+
+      // If it was a duplicate (23505), skip the popup and notification
+      if (insertError?.code === '23505') {
+        continue;
+      }
 
       if (badge.requirement_type === 'first_login') {
-        await supabase.from('gamification').update({ first_login_completed: true }).eq('user_id', userId);
+        await supabase
+          .from('gamification')
+          .update({ first_login_completed: true })
+          .eq('user_id', userId);
       }
 
       await supabase.from('notifications').insert({

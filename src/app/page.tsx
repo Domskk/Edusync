@@ -1,4 +1,5 @@
-'use client'  
+'use client'
+
 import { supabase } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -9,11 +10,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 type View = 'signin' | 'signup' | 'forgot';
 type Modal = { type: 'success' | 'error'; message: string } | null;
 
-
 const backdrop = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { duration: 0.2 } },
 };
+
 const modalAnimation = {
   hidden: { opacity: 0, scale: 0.85 },
   visible: { opacity: 1, scale: 1, transition: { duration: 0.2 } },
@@ -22,17 +23,40 @@ const modalAnimation = {
 
 export default function Home() {
   const router = useRouter();
-
   const [view, setView] = useState<View>('signin');
   const [loading, setLoading] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [modal, setModal] = useState<Modal>(null);
 
   useEffect(() => setModal(null), []);
 
   useEffect(() => {
+    // Check initial session
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { data: dbUser } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
+
+        const role = dbUser?.role ?? 'student';
+        const paths: Record<string, string> = {
+          admin: '/dashboard/admin',
+          student: '/dashboard/student',
+        };
+        router.replace(paths[role as keyof typeof paths]);
+      }
+    };
+
+    checkSession();
+
+    // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -55,6 +79,7 @@ export default function Home() {
         router.replace('/');
       }
     });
+
     return () => subscription.unsubscribe();
   }, [router]);
 
@@ -75,32 +100,64 @@ export default function Home() {
     try {
       if (view === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email: mail, password });
-        if (error) openModal('error', error.message);
+        if (error) {
+          openModal('error', error.message);
+        }
       } else if (view === 'signup') {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: mail,
           password,
-          options: { emailRedirectTo: window.location.origin },
+          options: {
+            emailRedirectTo: window.location.origin,
+            data: {
+              full_name: fullName.trim() || null,
+              display_name: displayName.trim(),
+            },
+          },
         });
-        if (error) openModal('error', error.message);
-        else openModal('success', 'Check your email for the confirmation link!');
+
+        if (error) {
+          // More specific error messages
+          if (error.message.includes('User already registered')) {
+            openModal('error', 'This email is already registered. Try signing in instead!');
+          } else {
+            openModal('error', error.message);
+          }
+        } else if (data.user) {
+          // Clear form fields
+          setEmail('');
+          setPassword('');
+          setFullName('');
+          setDisplayName('');
+          
+          if (!data.session) {
+            // Email confirmation required
+            openModal('success', 'Check your email for the confirmation link!');
+            setView('signin');
+          } else {
+            // Auto-confirmed - redirect will happen via auth listener
+            openModal('success', 'Welcome! Redirecting to your dashboard...');
+          }
+        }
       } else if (view === 'forgot') {
         const { error } = await supabase.auth.resetPasswordForEmail(mail, {
           redirectTo: `${window.location.origin}/update-password`,
         });
-        if (error) openModal('error', error.message);
-        else openModal('success', 'Password‑reset link sent! Check your inbox.');
+        if (error) {
+          openModal('error', error.message);
+        } else {
+          openModal('success', 'Password-reset link sent! Check your inbox.');
+        }
       }
     } finally {
       setLoading(false);
     }
   };
+
   return (
     <div className="relative min-h-screen animated-gradient">
-
       <main className="flex min-h-screen flex-col items-center justify-center p-8">
         <div className="w-full max-w-md space-y-8">
-
           {/* Logo + Title */}
           <div className="text-center">
             <div className="bg-white rounded-xl shadow-lg p-4 inline-block mb-6">
@@ -112,7 +169,6 @@ export default function Home() {
 
           {/* Form Card */}
           <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
-            
             <motion.form
               key={view}
               initial={{ opacity: 0, x: 30 }}
@@ -158,6 +214,41 @@ export default function Home() {
                 </div>
               )}
 
+              {/* Full Name & Display Name - Only on Signup */}
+              {view === 'signup' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Name (optional)</label>
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="John Doe"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900 placeholder-gray-400 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Display Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      required
+                      minLength={2}
+                      maxLength={30}
+                      placeholder="e.g. SuperLearner, Alex"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900 placeholder-gray-400 transition"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      This is how you will appear on leaderboards and badges!
+                    </p>
+                  </div>
+                </>
+              )}
+
               {/* Remember + Forgot */}
               {view === 'signin' && (
                 <div className="flex items-center justify-between text-sm">
@@ -174,7 +265,12 @@ export default function Home() {
               {/* Submit */}
               <button
                 type="submit"
-                disabled={loading || !email || (view !== 'forgot' && !password)}
+                disabled={
+                  loading ||
+                  !email ||
+                  (view !== 'forgot' && !password) ||
+                  (view === 'signup' && !displayName.trim())
+                }
                 className="w-full py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 transition"
               >
                 {loading ? (
@@ -188,7 +284,7 @@ export default function Home() {
               </button>
             </motion.form>
 
-            {/* Back to Sign‑in */}
+            {/* Back to Sign-in */}
             {view === 'forgot' && (
               <p className="text-center text-sm text-gray-600">
                 <button type="button" onClick={() => setView('signin')} className="text-indigo-600 hover:underline font-medium">
@@ -197,12 +293,12 @@ export default function Home() {
               </p>
             )}
 
-            {/* Toggle Sign‑up / Sign‑in */}
+            {/* Toggle Sign-up / Sign-in */}
             {view !== 'forgot' && (
               <p className="text-center text-sm text-gray-600">
                 {view === 'signin' ? (
                   <>
-                    Don’t have an account?{' '}
+                    Don&#39;t have an account?{' '}
                     <button type="button" onClick={() => setView('signup')} className="text-indigo-600 hover:underline font-medium">
                       Sign up
                     </button>
@@ -221,7 +317,7 @@ export default function Home() {
         </div>
       </main>
 
-      {/*  MODAL  */}
+      {/* MODAL */}
       <AnimatePresence>
         {modal && (
           <>
@@ -233,7 +329,6 @@ export default function Home() {
               exit="hidden"
               onClick={() => setModal(null)}
             />
-
             <motion.div
               className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full text-center z-50"
               variants={modalAnimation}
@@ -247,19 +342,15 @@ export default function Home() {
               >
                 <X size={20} />
               </button>
-
               {modal.type === 'success' ? (
                 <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
               ) : (
                 <XCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
               )}
-
               <h3 className={`text-lg font-semibold ${modal.type === 'success' ? 'text-gray-900' : 'text-red-700'}`}>
                 {modal.type === 'success' ? 'Success!' : 'Error'}
               </h3>
-
               <p className="text-sm text-gray-600 mt-1">{modal.message}</p>
-
               <button
                 onClick={() => {
                   setModal(null);

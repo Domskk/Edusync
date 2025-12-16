@@ -1,7 +1,6 @@
-// src/app/dashboard/student/ai-assistant/page.tsx
 'use client';
 
-import AIChat from '@/components/collaboration/AIchat';
+import AIChat from '@/components/AiChat/AIchat';
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import {
@@ -18,6 +17,7 @@ interface ChatSession {
   id: string;
   title: string | null;
   created_at: string;
+  user_id: string;
 }
 
 export default function AIAssistantPage() {
@@ -26,12 +26,27 @@ export default function AIAssistantPage() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  // Load chats — wrapped in useCallback to satisfy exhaustive-deps
+  // Get current user
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUserId(user.id);
+      }
+    };
+    getUser();
+  }, []);
+
+  // Load chats for current user only
   const loadChats = useCallback(async () => {
+    if (!userId) return;
+
     const { data } = await supabase
       .from('chat_sessions')
       .select('*')
+      .eq('user_id', userId)  // Filter by current user
       .order('created_at', { ascending: false });
 
     const chatList = data || [];
@@ -41,7 +56,7 @@ export default function AIAssistantPage() {
     if (chatList.length > 0 && !selectedChatId) {
       setSelectedChatId(chatList[0].id);
     }
-  }, [selectedChatId]);
+  }, [userId, selectedChatId]);
 
   // Detect mobile
   useEffect(() => {
@@ -58,15 +73,19 @@ export default function AIAssistantPage() {
     }
   }, [isMobile]);
 
-  // Load on mount + when a chat is deleted/created
+  // Load on mount + when userId is available
   useEffect(() => {
-    loadChats();
-  }, [loadChats]);
+    if (userId) {
+      loadChats();
+    }
+  }, [userId, loadChats]);
 
   const startNewChat = useCallback(async () => {
+    if (!userId) return;
+
     const { data } = await supabase
       .from('chat_sessions')
-      .insert([{ title: 'New Chat' }])
+      .insert([{ title: 'New Chat', user_id: userId }])  // Include user_id
       .select()
       .single();
 
@@ -74,7 +93,7 @@ export default function AIAssistantPage() {
       setChats(prev => [data, ...prev]);
       setSelectedChatId(data.id);
     }
-  }, []);
+  }, [userId]);
 
   const deleteChat = useCallback(
     async (id: string) => {
@@ -82,7 +101,8 @@ export default function AIAssistantPage() {
       setChats(prev => prev.filter(c => c.id !== id));
 
       if (selectedChatId === id) {
-        setSelectedChatId(chats[0]?.id ?? null);
+        const remainingChats = chats.filter(c => c.id !== id);
+        setSelectedChatId(remainingChats[0]?.id ?? null);
       }
     },
     [selectedChatId, chats]
@@ -113,31 +133,37 @@ export default function AIAssistantPage() {
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {chats.map(chat => (
-            <div
-              key={chat.id}
-              onClick={() => setSelectedChatId(chat.id)}
-              className={`group flex items-center gap-3 px-4 py-3 rounded-2xl cursor-pointer transition-all ${
-                selectedChatId === chat.id
-                  ? 'bg-white/15 shadow-lg shadow-blue-500/20'
-                  : 'hover:bg-white/8'
-              }`}
-            >
-              <ChatBubbleLeftEllipsisIcon className="w-5 h-5 text-blue-400 flex-shrink-0" />
-              <span className="text-sm truncate flex-1">
-                {chat.title || 'New Chat'}
-              </span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm('Delete this chat?')) deleteChat(chat.id);
-                }}
-                className="opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition"
-              >
-                <TrashIcon className="w-4 h-4" />
-              </button>
+          {chats.length === 0 ? (
+            <div className="text-center text-gray-400 text-sm mt-8">
+              No chats yet. Start a new one!
             </div>
-          ))}
+          ) : (
+            chats.map(chat => (
+              <div
+                key={chat.id}
+                onClick={() => setSelectedChatId(chat.id)}
+                className={`group flex items-center gap-3 px-4 py-3 rounded-2xl cursor-pointer transition-all ${
+                  selectedChatId === chat.id
+                    ? 'bg-white/15 shadow-lg shadow-blue-500/20'
+                    : 'hover:bg-white/8'
+                }`}
+              >
+                <ChatBubbleLeftEllipsisIcon className="w-5 h-5 text-blue-400 flex-shrink-0" />
+                <span className="text-sm truncate flex-1">
+                  {chat.title || 'New Chat'}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('Delete this chat?')) deleteChat(chat.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition"
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -166,7 +192,16 @@ export default function AIAssistantPage() {
 
         {/* Chat Area */}
         <div className="flex-1 overflow-hidden">
-          <AIChat chatId={selectedChatId} onTitleUpdate={updateTitle} sidebarOpen={sidebarOpen} />
+          {selectedChatId ? (
+            <AIChat chatId={selectedChatId} onTitleUpdate={updateTitle} sidebarOpen={sidebarOpen} />
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              <div className="text-center">
+                <ChatBubbleLeftEllipsisIcon className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                <p className="text-lg">Select a chat or start a new one</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
