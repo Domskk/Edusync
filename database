@@ -1,0 +1,243 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.ai_chats (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  chat_id uuid NOT NULL,
+  sender text NOT NULL CHECK (sender = ANY (ARRAY['user'::text, 'ai'::text])),
+  message text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ai_chats_pkey PRIMARY KEY (id),
+  CONSTRAINT ai_chats_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chat_sessions(id)
+);
+CREATE TABLE public.ai_study_plans (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  course_id uuid,
+  content jsonb NOT NULL,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT ai_study_plans_pkey PRIMARY KEY (id),
+  CONSTRAINT ai_study_plans_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT ai_study_plans_course_id_fkey FOREIGN KEY (course_id) REFERENCES public.courses(id)
+);
+CREATE TABLE public.assignments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  due_date timestamp with time zone,
+  is_completed boolean DEFAULT false,
+  created_at timestamp without time zone DEFAULT now(),
+  user_id uuid,
+  subject text,
+  CONSTRAINT assignments_pkey PRIMARY KEY (id),
+  CONSTRAINT assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.badges (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL UNIQUE,
+  description text,
+  icon text,
+  requirement_type text NOT NULL CHECK (requirement_type = ANY (ARRAY['points'::text, 'level'::text, 'streak'::text, 'top_10'::text, 'top_1'::text, 'first_login'::text, 'perfect_week'::text])),
+  requirement_value integer NOT NULL,
+  rarity text DEFAULT 'common'::text CHECK (rarity = ANY (ARRAY['common'::text, 'rare'::text, 'epic'::text, 'legendary'::text, 'mythic'::text])),
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT badges_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.board_activities (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  board_id uuid,
+  user_id uuid,
+  action text NOT NULL,
+  details jsonb DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT board_activities_pkey PRIMARY KEY (id),
+  CONSTRAINT board_activities_board_id_fkey FOREIGN KEY (board_id) REFERENCES public.shared_boards(id),
+  CONSTRAINT board_activities_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.board_invites (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  board_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  invited_user_id uuid DEFAULT auth.uid(),
+  invited_by uuid DEFAULT auth.uid(),
+  status text DEFAULT 'pending'::text,
+  created_at timestamp without time zone DEFAULT '2025-12-09 08:45:53.211302'::timestamp without time zone,
+  CONSTRAINT board_invites_pkey PRIMARY KEY (id),
+  CONSTRAINT board_invites_board_id_fkey FOREIGN KEY (board_id) REFERENCES public.shared_boards(id),
+  CONSTRAINT board_invites_invited_user_id_fkey FOREIGN KEY (invited_user_id) REFERENCES public.users(id),
+  CONSTRAINT board_invites_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.board_labels (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  board_id uuid,
+  name text NOT NULL,
+  color text NOT NULL DEFAULT '#8b5cf6'::text,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT board_labels_pkey PRIMARY KEY (id),
+  CONSTRAINT board_labels_board_id_fkey FOREIGN KEY (board_id) REFERENCES public.shared_boards(id),
+  CONSTRAINT board_labels_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.card_comments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  board_id uuid,
+  card_id text NOT NULL,
+  user_id uuid,
+  content text NOT NULL,
+  mentions ARRAY DEFAULT '{}'::uuid[],
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT card_comments_pkey PRIMARY KEY (id),
+  CONSTRAINT card_comments_board_id_fkey FOREIGN KEY (board_id) REFERENCES public.shared_boards(id),
+  CONSTRAINT card_comments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.chat_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  title text,
+  created_at timestamp with time zone DEFAULT now(),
+  user_id uuid,
+  CONSTRAINT chat_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT chat_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.courses (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  title text NOT NULL,
+  description text,
+  color text,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT courses_pkey PRIMARY KEY (id),
+  CONSTRAINT courses_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.files (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  uploader_id uuid,
+  group_id uuid,
+  file_name text,
+  file_url text,
+  shared_with ARRAY DEFAULT '{}'::uuid[],
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT files_pkey PRIMARY KEY (id),
+  CONSTRAINT files_uploader_id_fkey FOREIGN KEY (uploader_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.flashcard_decks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  description text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT flashcard_decks_pkey PRIMARY KEY (id),
+  CONSTRAINT flashcard_decks_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.flashcards (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  deck_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  front text NOT NULL,
+  back text NOT NULL,
+  hint text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  last_reviewed timestamp with time zone,
+  ease_factor numeric DEFAULT 2.5,
+  interval_days integer DEFAULT 1,
+  reps integer DEFAULT 0,
+  CONSTRAINT flashcards_pkey PRIMARY KEY (id),
+  CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES public.flashcard_decks(id),
+  CONSTRAINT flashcards_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.friends (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  friend_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'accepted'::text, 'blocked'::text])),
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT friends_pkey PRIMARY KEY (id),
+  CONSTRAINT friends_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT friends_friend_id_fkey FOREIGN KEY (friend_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.gamification (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid UNIQUE,
+  points integer DEFAULT 0,
+  badge_name text,
+  created_at timestamp without time zone DEFAULT now(),
+  current_streak integer DEFAULT 0,
+  last_study_date timestamp with time zone,
+  first_login_completed boolean DEFAULT false,
+  CONSTRAINT gamification_pkey PRIMARY KEY (id),
+  CONSTRAINT gamification_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  message text NOT NULL,
+  read boolean DEFAULT false,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.progress (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  course_id uuid,
+  completed_tasks integer DEFAULT 0,
+  total_tasks integer DEFAULT 0,
+  progress_percent double precision DEFAULT 0,
+  updated_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT progress_pkey PRIMARY KEY (id),
+  CONSTRAINT progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT progress_course_id_fkey FOREIGN KEY (course_id) REFERENCES public.courses(id)
+);
+CREATE TABLE public.quiz_questions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  quiz_id uuid NOT NULL,
+  question text NOT NULL,
+  correct_answer text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT quiz_questions_pkey PRIMARY KEY (id),
+  CONSTRAINT quiz_questions_quiz_id_fkey FOREIGN KEY (quiz_id) REFERENCES public.quizzes(id)
+);
+CREATE TABLE public.quizzes (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  description text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT quizzes_pkey PRIMARY KEY (id),
+  CONSTRAINT quizzes_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.shared_boards (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  group_id uuid,
+  owner_id uuid,
+  title text,
+  content jsonb DEFAULT '{}'::jsonb,
+  collaborator_ids ARRAY DEFAULT '{}'::uuid[],
+  created_at timestamp without time zone DEFAULT now(),
+  background_color text DEFAULT '#6366f1'::text,
+  columns jsonb DEFAULT '[{"id": "col1", "title": "To Do", "cardIds": []}, {"id": "col2", "title": "In Progress", "cardIds": []}, {"id": "col3", "title": "Done", "cardIds": []}]'::jsonb,
+  cards jsonb DEFAULT '{}'::jsonb,
+  CONSTRAINT shared_boards_pkey PRIMARY KEY (id),
+  CONSTRAINT shared_boards_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.user_badges (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  badge_id uuid NOT NULL,
+  earned_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT user_badges_pkey PRIMARY KEY (id),
+  CONSTRAINT user_badges_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT user_badges_badge_id_fkey FOREIGN KEY (badge_id) REFERENCES public.badges(id)
+);
+CREATE TABLE public.users (
+  id uuid NOT NULL,
+  email text UNIQUE,
+  full_name text,
+  role USER-DEFINED DEFAULT 'student'::user_role,
+  created_at timestamp with time zone DEFAULT now(),
+  avatar_url text,
+  display_name text,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
