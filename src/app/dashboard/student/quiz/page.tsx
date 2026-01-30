@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { ArrowLeftIcon, BrainIcon, Trash2Icon, CheckCircle2Icon, XCircleIcon } from 'lucide-react';
 
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -12,7 +12,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from '@/components/ui/Card';
+} from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertDialog,
